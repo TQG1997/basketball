@@ -82,7 +82,52 @@ docker run --runtime=nvidia -it --rm -v $PWD:$PWD --net host nvcr.io/nvidia/tens
 
 ## Dataset
 
-Download the dataset from [Google Drive](https://drive.google.com/drive/folders/1uNPw7LOA3xENclQRtSlUftiR7tlVNOts?usp=share_link) and place `.npy` files under `data/`.
+### Files
+
+| File | Shape | Type | Size | Description |
+|---|---|---|---|---|
+| `50Real.npy` | (14032, 50, 11, 4) | float64 | 236MB | Ground truth plays: ball trajectory + player positions (50 timesteps) |
+| `50Seq.npy` | (14032, 50, 12) | float64 | 64MB | Offence conditioning sequences (ball + 5 offence players x,y) |
+| `FEATURES-4.npy` | (11863, 100, 11, 4) | float64 | 398MB | Full-length ground truth (100 timesteps), no truncation |
+| `RealCond.npy` | (14032, 50, 6) | int32 | 16MB | Ball status features for ground truth plays (binary indicators) |
+| `SeqCond.npy` | (14032, 50, 6) | int32 | 16MB | Ball status features for conditioning sequences (binary indicators) |
+
+### Feature Layout
+
+**50Real.npy** — 4D tensor organized as `[sample, timestep, entity, feature]`:
+
+```
+entity 0:     ball           (x, y, z, flag)
+entity 1-5:   offence A1-A5  (x, y, z, flag)
+entity 6-10:  defence B1-B5  (x, y, z, flag)
+```
+
+- `x, y`: court coordinates (normalised during training)
+- `z`: ball height (ball only; player z is 0)
+- `flag`: `1` for ball, `0` for players
+
+**50Seq.npy** — 3D tensor `[sample, timestep, feature]`, each timestep contains 12 values:
+
+```
+[ball.x, ball.y, A1.x, A1.y, A2.x, A2.y, A3.x, A3.y, A4.x, A4.y, A5.x, A5.y]
+```
+
+**RealCond.npy / SeqCond.npy** — 3D tensor `[sample, timestep, feature]`, each timestep has 6 binary ball-status indicators:
+
+```
+[dribble_by_A1, dribble_by_A2, dribble_by_A3, dribble_by_A4, dribble_by_A5, pass]
+```
+
+Exactly one is `1` per timestep (one-hot state of which player has possession).
+
+### Data Split
+
+The dataset is split 9:1 into training and validation sets (by the `DataFactory` class in `utils.py`). No shuffle is applied before the split; it assumes the data is already randomly ordered.
+
+### Source
+
+Download the original dataset from the [BasketballGAN Google Drive folder](https://drive.google.com/drive/folders/1uNPw7LOA3xENclQRtSlUftiR7tlVNOts?usp=share_link). The data consists of NBA play-by-play tracking data, processed into fixed-length game segments.
+
 
 ## Citation
 
