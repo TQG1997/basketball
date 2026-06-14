@@ -119,14 +119,14 @@ class VAEGAN_Model():
                     inputs=pooled,
                     units=self.latent_dims,
                     activation=None,
-                    kernel_initializer=tf.initializers.glorot_uniform(),
+                    kernel_initializer=tf.initializers.glorot_normal(),
                     bias_initializer=tf.zeros_initializer(),
                     scope='z_mean')
                 z_log_var = tf.layers.dense(
                     inputs=pooled,
                     units=self.latent_dims,
                     activation=None,
-                    kernel_initializer=tf.initializers.glorot_uniform(),
+                    kernel_initializer=tf.initializers.glorot_normal(),
                     bias_initializer=tf.zeros_initializer(),
                     scope='z_log_var')
 
@@ -161,7 +161,7 @@ class VAEGAN_Model():
                     inputs=concat_,
                     units=self.n_filters,
                     activation=None,
-                    kernel_initializer=tf.initializers.glorot_uniform(),
+                    kernel_initializer=tf.initializers.glorot_normal(),
                     bias_initializer=tf.zeros_initializer(),
                     name='conds_linear')
 
@@ -170,7 +170,7 @@ class VAEGAN_Model():
                     inputs=x,
                     units=self.n_filters,
                     activation=None,
-                    kernel_initializer=tf.initializers.glorot_uniform(),
+                    kernel_initializer=tf.initializers.glorot_normal(),
                     bias_initializer=tf.zeros_initializer(),
                     name='latents_linear')
             latents_linear = tf.reshape(latents_linear,
