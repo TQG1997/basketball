@@ -1,0 +1,43 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Model checkpoints (large)
+# Uncomment to exclude from version control:
+# ui/Data/checkpoints/
+
+# Data files (large)
+# data/
+
+# Archives
+*.zip
+*.tar
+*.tar.gz
+
+# Training output
+tmp/
+
+# Environment
+.env
+.venv
+venv/
+env/
+
+# Codex config
+.codex/
+.agents/
+
+# Pre-existing training results
+BBALL_RESULTS/
