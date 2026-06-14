@@ -1,9 +1,6 @@
 import numpy as np
-import argparse
 
 import os
-from os import listdir
-from os.path import join
 
 import time
 import matplotlib

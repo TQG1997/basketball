@@ -1,6 +1,5 @@
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtWidgets import *
-import tensorflow as tf
 from PyQt5.QtCore import Qt
 from Drawingboard import App
 from Court import Court

@@ -1,9 +1,6 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
 
-import tensorflow as tf
-from tensorflow.contrib import layers
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
 from utils import DataFactory
 import ops
 import os
@@ -118,19 +115,19 @@ class VAEGAN_Model():
 
             # Latent distribution parameters
             with tf.variable_scope('enc_latent'):
-                z_mean = layers.fully_connected(
+                z_mean = tf.layers.dense(
                     inputs=pooled,
-                    num_outputs=self.latent_dims,
-                    activation_fn=None,
-                    weights_initializer=layers.xavier_initializer(uniform=False),
-                    biases_initializer=tf.zeros_initializer(),
+                    units=self.latent_dims,
+                    activation=None,
+                    kernel_initializer=tf.initializers.glorot_uniform(),
+                    bias_initializer=tf.zeros_initializer(),
                     scope='z_mean')
-                z_log_var = layers.fully_connected(
+                z_log_var = tf.layers.dense(
                     inputs=pooled,
-                    num_outputs=self.latent_dims,
-                    activation_fn=None,
-                    weights_initializer=layers.xavier_initializer(uniform=False),
-                    biases_initializer=tf.zeros_initializer(),
+                    units=self.latent_dims,
+                    activation=None,
+                    kernel_initializer=tf.initializers.glorot_uniform(),
+                    bias_initializer=tf.zeros_initializer(),
                     scope='z_log_var')
 
             return z_mean, z_log_var
@@ -159,23 +156,23 @@ class VAEGAN_Model():
         with tf.variable_scope(scope, reuse=reuse):
             concat_ = tf.concat([cond, self.seq_feature], axis=-1)
 
-            with tf.variable_scope('conds_linear') as scope:
-                conds_linear = layers.fully_connected(
+            with tf.variable_scope('conds_linear'):
+                conds_linear = tf.layers.dense(
                     inputs=concat_,
-                    num_outputs=self.n_filters,
-                    activation_fn=None,
-                    weights_initializer=layers.xavier_initializer(uniform=False),
-                    biases_initializer=tf.zeros_initializer(),
-                    scope=scope)
+                    units=self.n_filters,
+                    activation=None,
+                    kernel_initializer=tf.initializers.glorot_uniform(),
+                    bias_initializer=tf.zeros_initializer(),
+                    name='conds_linear')
 
-            with tf.variable_scope('latents_linear') as scope:
-                latents_linear = layers.fully_connected(
+            with tf.variable_scope('latents_linear'):
+                latents_linear = tf.layers.dense(
                     inputs=x,
-                    num_outputs=self.n_filters,
-                    activation_fn=None,
-                    weights_initializer=layers.xavier_initializer(uniform=False),
-                    biases_initializer=tf.zeros_initializer(),
-                    scope=scope)
+                    units=self.n_filters,
+                    activation=None,
+                    kernel_initializer=tf.initializers.glorot_uniform(),
+                    bias_initializer=tf.zeros_initializer(),
+                    name='latents_linear')
             latents_linear = tf.reshape(latents_linear,
                                         shape=[-1, 1, self.n_filters])
 
@@ -189,7 +186,7 @@ class VAEGAN_Model():
                                       residual_alpha=1.0)
                 next_input = res_b
 
-            with tf.variable_scope('conv_result') as scope:
+            with tf.variable_scope('conv_result'):
                 nonlinear = tf.nn.leaky_relu(next_input)
                 padded = tf.concat(
                     [nonlinear[:, 0:2], nonlinear, nonlinear[:, -2:]], axis=1)
@@ -207,7 +204,7 @@ class VAEGAN_Model():
         concat_ = tf.concat([conds, x], axis=-1)
 
         with tf.variable_scope(scope, reuse=reuse):
-            with tf.variable_scope('conv_input') as scope:
+            with tf.variable_scope('conv_input'):
                 conv_input = ops.conv1d_sn(concat_, 1, 'VALID', self.n_filters)
             next_input = conv_input
             for i in range(self.n_resblock):
@@ -220,7 +217,7 @@ class VAEGAN_Model():
                 )
                 next_input = res_b
 
-            with tf.variable_scope('conv_output') as scope:
+            with tf.variable_scope('conv_output'):
                 nonlinear = tf.nn.leaky_relu(next_input)
                 conv_output = ops.conv1d_sn(nonlinear, 1, 'VALID', 1)
                 score = conv_output
