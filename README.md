@@ -25,15 +25,22 @@ python src/train.py --data_path=data --output=output --max_epochs=500 --auto --y
 
 One-click training on free GPU. Use **Runtime → Change runtime type → T4 GPU**.
 
-## Web UI
+## Inference (Local)
 
 ```bash
-pip install gradio
+# Create minimal venv (no training deps)
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements-inference.txt
+
+# Launch Web UI
 python ui/app.py              # http://127.0.0.1:7860
 python ui/app.py --share      # public link
 ```
 
 Interactive browser interface: upload sketches, place points on court, view generated plays. Requires a trained checkpoint at `ui/Data/checkpoints/model_epoch500.pt`.
+
+> China users: add `-i https://pypi.tuna.tsinghua.edu.cn/simple` for faster install.
 
 ## Project Structure
 

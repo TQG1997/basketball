@@ -1,0 +1,5 @@
+# Inference-only dependencies (minimal)
+torch>=2.1
+numpy>=1.24
+matplotlib>=3.7
+gradio>=4.0
