@@ -9,7 +9,7 @@ Architecture:
 import os
 import tensorflow as tf
 import numpy as np
-from ops import Conv1D_SN, ResidualBlock
+from ops import Conv1D_SN, ResidualBlock, SelfAttentionBlock, CrossAttentionBlock
 
 
 # ---------------------------------------------------------------------------
@@ -27,9 +27,13 @@ def reparameterize(z_mean, z_log_var):
 # ---------------------------------------------------------------------------
 
 class Encoder(tf.keras.Model):
-    """Encodes (conds, real_play) into latent distribution parameters."""
+    """Encodes (conds, real_play) into latent distribution parameters.
 
-    def __init__(self, latent_dims, n_filters, n_resblock, **kwargs):
+    Includes self-attention for global temporal + player-interaction modeling.
+    """
+
+    def __init__(self, latent_dims, n_filters, n_resblock,
+                 num_heads=4, **kwargs):
         super().__init__(**kwargs)
         self.latent_dims = latent_dims
         self.n_filters = n_filters
@@ -40,6 +44,8 @@ class Encoder(tf.keras.Model):
             ResidualBlock(n_filters, name=f'enc_Res{i}')
             for i in range(n_resblock)
         ]
+        self.self_attn = SelfAttentionBlock(
+            num_heads=num_heads, key_dim=n_filters // num_heads, name='enc_attn')
         self.dense_mean = tf.keras.layers.Dense(
             latent_dims, activation=None, dtype='float32',
             kernel_initializer=tf.keras.initializers.GlorotNormal(),
@@ -49,13 +55,14 @@ class Encoder(tf.keras.Model):
             kernel_initializer=tf.keras.initializers.GlorotNormal(),
             bias_initializer='zeros', name='z_log_var')
 
-    def call(self, conds, target, training=None):
-        x = tf.concat([conds, target], axis=-1)              # [B, T, C_conds + C_target]
-        x = self.conv_input(x)                                # [B, T, n_filters]
+    def call(self, conds, target, mask=None, training=None):
+        x = tf.concat([conds, target], axis=-1)
+        x = self.conv_input(x)
         for block in self.res_blocks:
             x = block(x, training=training)
-        x = tf.reduce_mean(x, axis=1)                         # [B, n_filters]  — global temporal pooling
-        return self.dense_mean(x), self.dense_log_var(x)      # [B, latent_dims] each
+        x = self.self_attn(x, mask=mask, training=training)  # global temporal attention
+        x = tf.reduce_mean(x, axis=1)                         # global temporal pooling
+        return self.dense_mean(x), self.dense_log_var(x)
 
 
 # ---------------------------------------------------------------------------
@@ -65,11 +72,14 @@ class Encoder(tf.keras.Model):
 class Generator(tf.keras.Model):
     """Decodes (seq, seq_feat, z) into a full play [B, T, 28].
 
+    Includes self-attention for temporal coherence and cross-attention
+    to let generated features attend to offensive conditioning.
+
     Output channels 0-21: player positions (ball xy + 10 players xy)
     Output channels 22-27: ball-status features (sigmoid)
     """
 
-    def __init__(self, n_filters, n_resblock, **kwargs):
+    def __init__(self, n_filters, n_resblock, num_heads=4, **kwargs):
         super().__init__(**kwargs)
         self.n_filters = n_filters
         self.n_resblock = n_resblock
@@ -86,20 +96,25 @@ class Generator(tf.keras.Model):
             ResidualBlock(n_filters, name=f'G_Res{i}')
             for i in range(n_resblock)
         ]
+        self.self_attn = SelfAttentionBlock(
+            num_heads=num_heads, key_dim=n_filters // num_heads, name='G_self_attn')
+        self.cross_attn = CrossAttentionBlock(
+            num_heads=num_heads, key_dim=n_filters // num_heads, name='G_cross_attn')
         self.output_conv = Conv1D_SN(28, kernel_size=1, dtype='float32', name='conv_result')
 
-    def call(self, seq, seq_feat, z, training=None):
-        # Conditioning: seq + seq_feat
+    def call(self, seq, seq_feat, z, mask=None, training=None):
         conds_full = tf.concat([seq, seq_feat], axis=-1)
         conds_linear = self.conds_dense(conds_full)            # [B, T, n_filters]
 
-        # Latent: dense → reshape to [B, 1, n_filters]
         latents_linear = self.latent_dense(z)
         latents_linear = tf.reshape(latents_linear, [-1, 1, self.n_filters])
 
         x = conds_linear + latents_linear                      # [B, T, n_filters]
         for block in self.res_blocks:
             x = block(x, training=training)
+        x = self.self_attn(x, mask=mask, training=training)    # temporal self-attention
+        x = self.cross_attn(x, conds_linear, mask=mask,        # attend to offence conditioning
+                            training=training)
 
         nonlinear = tf.nn.leaky_relu(x)
         padded = tf.concat([nonlinear[:, 0:2], nonlinear, nonlinear[:, -2:]], axis=1)
@@ -117,10 +132,11 @@ class Generator(tf.keras.Model):
 class Discriminator(tf.keras.Model):
     """Critic: (conds, x) → (global_score, per_frame_score).
 
+    Includes self-attention for global temporal consistency judgment.
     Architecture shared by all three discriminators (O_disc, D_disc, P_disc).
     """
 
-    def __init__(self, n_filters, n_resblock, **kwargs):
+    def __init__(self, n_filters, n_resblock, num_heads=4, **kwargs):
         super().__init__(**kwargs)
         self.n_filters = n_filters
         self.n_resblock = n_resblock
@@ -130,13 +146,16 @@ class Discriminator(tf.keras.Model):
             ResidualBlock(n_filters, name=f'disc_Res{i}')
             for i in range(n_resblock)
         ]
+        self.self_attn = SelfAttentionBlock(
+            num_heads=num_heads, key_dim=n_filters // num_heads, name='disc_attn')
         self.conv_output = Conv1D_SN(1, kernel_size=1, dtype='float32', name='conv_output')
 
-    def call(self, conds, x, training=None):
+    def call(self, conds, x, mask=None, training=None):
         inp = tf.concat([conds, x], axis=-1)
         h = self.conv_input(inp)
         for block in self.res_blocks:
             h = block(h, training=training)
+        h = self.self_attn(h, mask=mask, training=training)    # temporal self-attention
         nonlinear = tf.nn.leaky_relu(h)
         score = self.conv_output(nonlinear)                    # [B, T, 1]
         global_score = tf.reduce_mean(score, axis=1)           # [B, 1]
@@ -170,16 +189,21 @@ class VAEGAN_Model:
         self.recon_weight = getattr(config, 'recon_weight', 1.0)
         self.features_ = config.features_
         self.features_d = config.features_d
+        self.num_heads = getattr(config, 'num_heads', 4)
 
         # Sub-models
         self.encoder = Encoder(self.latent_dims, self.n_filters, self.n_resblock,
-                               name='E_')
-        self.generator = Generator(self.n_filters, self.n_resblock, name='G_')
+                               num_heads=self.num_heads, name='E_')
+        self.generator = Generator(self.n_filters, self.n_resblock,
+                                   num_heads=self.num_heads, name='G_')
 
         # Three discriminators (independent copies — different variable scopes)
-        self.disc_O = Discriminator(self.n_filters, self.n_resblock, name='O_disc')
-        self.disc_D = Discriminator(self.n_filters, self.n_resblock, name='D_disc')
-        self.disc_P = Discriminator(self.n_filters, self.n_resblock, name='P_disc')
+        self.disc_O = Discriminator(self.n_filters, self.n_resblock,
+                                    num_heads=self.num_heads, name='O_disc')
+        self.disc_D = Discriminator(self.n_filters, self.n_resblock,
+                                    num_heads=self.num_heads, name='D_disc')
+        self.disc_P = Discriminator(self.n_filters, self.n_resblock,
+                                    num_heads=self.num_heads, name='P_disc')
 
         # Optimizers
         self.gen_optimizer = tf.keras.optimizers.Adam(
@@ -411,9 +435,15 @@ class VAEGAN_Model:
 
         return {'d_cost': d_cost_all, 'grad_pen': gp_all, 'em_dist': em_dist}
 
-    def train_G(self, real, real_d, seq, seq_feat, real_feat, df_basket_right):
-        """One G-update step — updates generator + encoder jointly."""
+    def train_G(self, real, real_d, seq, seq_feat, real_feat, df_basket_right,
+                beta=None):
+        """One G-update step — updates generator + encoder jointly.
+
+        Args:
+            beta: KL weight (if None, uses self.beta). Allows annealing schedule.
+        """
         B = tf.shape(real)[0]
+        _beta = self.beta if beta is None else beta
         real_play = tf.concat([real, real_d, real_feat], axis=-1)
         conds = tf.concat([seq, seq_feat], axis=-1)
 
@@ -463,7 +493,7 @@ class VAEGAN_Model:
                         + scale * pass_pen
                         + scale * acc_pen
                         + self.recon_weight * recon_loss
-                        + self.beta * kl_loss)
+                        + _beta * kl_loss)
 
         grads = tape.gradient(gen_cost, gen_vars)
         self.gen_optimizer.apply_gradients(zip(grads, gen_vars))

@@ -1,6 +1,63 @@
-"""Custom Keras layers: Conv1D with spectral normalization + residual blocks."""
+"""Custom Keras layers: Conv1D with spectral normalization + residual blocks + attention."""
 
 import tensorflow as tf
+
+
+# ---------------------------------------------------------------------------
+#   Attention blocks
+# ---------------------------------------------------------------------------
+
+
+class SelfAttentionBlock(tf.keras.layers.Layer):
+    """Multi-head self-attention with residual connection + layer norm.
+
+    Adds global temporal reasoning on top of the local conv features.
+    """
+
+    def __init__(self, num_heads=4, key_dim=None, **kwargs):
+        super().__init__(**kwargs)
+        self.num_heads = num_heads
+        self.key_dim = key_dim
+        self.attn = None  # built in build()
+        self.layernorm = tf.keras.layers.LayerNormalization(epsilon=1e-6)
+
+    def build(self, input_shape):
+        kd = self.key_dim or input_shape[-1] // self.num_heads
+        self.attn = tf.keras.layers.MultiHeadAttention(
+            num_heads=self.num_heads, key_dim=kd,
+            dropout=0.0, name='mha')
+
+    def call(self, x, mask=None, training=None):
+        attn_out = self.attn(query=x, key=x, value=x, attention_mask=mask)
+        return self.layernorm(x + attn_out)
+
+
+class CrossAttentionBlock(tf.keras.layers.Layer):
+    """Cross-attention: query attends to key/value with residual + layer norm."""
+
+    def __init__(self, num_heads=4, key_dim=None, **kwargs):
+        super().__init__(**kwargs)
+        self.num_heads = num_heads
+        self.key_dim = key_dim
+        self.attn = None
+        self.layernorm = tf.keras.layers.LayerNormalization(epsilon=1e-6)
+
+    def build(self, input_shape):
+        # input_shape is ignored; we handle two inputs in call()
+        kd = self.key_dim or 64
+        self.attn = tf.keras.layers.MultiHeadAttention(
+            num_heads=self.num_heads, key_dim=kd,
+            dropout=0.0, name='cross_mha')
+
+    def call(self, query, key_value, mask=None, training=None):
+        attn_out = self.attn(query=query, key=key_value, value=key_value,
+                             attention_mask=mask)
+        return self.layernorm(query + attn_out)
+
+
+# ---------------------------------------------------------------------------
+#   Spectral norm conv + residual blocks
+# ---------------------------------------------------------------------------
 
 
 class Conv1D_SN(tf.keras.layers.Layer):

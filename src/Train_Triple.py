@@ -72,6 +72,7 @@ class Trainer:
         mc.latent_dims = m.latent_dims
         mc.n_filters = m.n_filters
         mc.n_resblock = m.n_resblock
+        mc.num_heads = m.num_heads
         mc.lr_ = t.lr_
         mc.beta = t.beta
         mc.recon_weight = t.recon_weight
@@ -80,6 +81,14 @@ class Trainer:
         mc.keep_prob = 1.0
         mc.folder_path = p.folder_path
         return mc
+
+    def _get_beta(self):
+        """Compute KL weight with linear annealing schedule."""
+        anneal_epochs = self.cfg.training.kl_anneal_epochs
+        if anneal_epochs <= 0:
+            return self.cfg.training.beta
+        ratio = min(1.0, self.epoch_id / anneal_epochs)
+        return ratio * self.cfg.training.beta
 
     def _get_batch(self, data_dict, seq_data, feat_data, real_feat_data, idx):
         batch = data_dict['A'][idx:idx + self.bs]
@@ -129,7 +138,9 @@ class Trainer:
                 self.data_factory.f_train,
                 self.data_factory.rf_train,
                 self.batch_id * self.bs)
-            g_losses = self.model.train_G(real, real_d, seq, seq_feat, real_feat, br)
+            current_beta = self._get_beta()
+            g_losses = self.model.train_G(real, real_d, seq, seq_feat, real_feat, br,
+                                          beta=current_beta)
 
             self._update_batch_id_and_shuffle(ckpt_step, vis_freq)
 
