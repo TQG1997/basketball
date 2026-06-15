@@ -2,13 +2,7 @@
 
 ### Generate defensive basketball play simulations from offensive sketches.
 
-A VAE-GAN model that generates realistic defensive player movements conditioned on an offensive play sequence, using three WGAN-GP discriminators.
-
-## Prerequisites
-
-- Linux / macOS
-- NVIDIA GPU (for training)
-- Python 3.8+
+A **Diffusion Model** (DDPM + DDIM) that generates realistic defensive player movements conditioned on an offensive play sequence, using ResBlock1D + Self-Attention + Cross-Attention.
 
 ## Quick Start
 
@@ -24,102 +18,109 @@ pip install -r requirements.txt
 #    https://drive.google.com/drive/folders/1uNPw7LOA3xENclQRtSlUftiR7tlVNOts
 
 # 4. Train
-python src/Train_Triple.py --folder_path='output' --data_path='data'
+python src/train.py --data_path=data --output=output --max_epochs=500
 ```
-
-Checkpoints and sample animations are saved under the `--folder_path` directory.
 
 ## Google Colab
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/TQG1997/basketball/blob/main/notebooks/train.ipynb)
 
-Use **Runtime → Change runtime type → T4 GPU**. The notebook handles cloning, dependency installation, dataset download, Drive mounting, and training in one go.
+Use **Runtime → Change runtime type → T4 GPU**. The notebook handles everything end-to-end.
 
 > Set `--max_epochs` to avoid exhausting the Colab session limit (~12h for free tier).
 
-## UI Application
+## Web UI
 
-Interactive PyQt5 desktop app for sketching offensive plays and visualizing generated defensive responses:
+Modern Gradio web interface — sketch plays and visualize generated defense in your browser:
 
 ```bash
-cd ui
-python Main.py
+pip install gradio
+python ui/app.py              # http://127.0.0.1:7860
+python ui/app.py --share      # public link
 ```
 
-Requires a pre-trained model checkpoint placed at `ui/Data/checkpoints/`.
+Three tabs: upload `.npy` sketch file, interactive court click-to-place, or read about the model.
+
+Requires a trained checkpoint at `ui/Data/checkpoints/model_epoch500.pt`.
 
 ## Project Structure
 
 ```
 Basketball/
-├── src/                    # VAE-GAN model + training pipeline
-│   ├── Train_Triple.py     # Training entry point
-│   ├── ThreeDiscrim.py     # VAE-GAN model (encoder, generator, 3 discriminators)
-│   ├── ops.py              # Spectral norm, conv1d, residual blocks
-│   ├── utils.py            # DataFactory re-export
-│   └── game_visualizer.py  # Play animation (matplotlib)
-├── ui/                     # PyQt5 interactive sketch-to-play app
-│   ├── Main.py             # Main window
-│   ├── Drawingboard.py     # Sketch input (ball + 5 offence players)
-│   ├── Court.py            # Court playback (matplotlib canvas)
-│   ├── WGAN.py             # Model loading & inference
-│   ├── SavePos.py          # Bezier curve trajectory smoothing
-│   ├── draw_feat.py        # Ball-possession feature extraction
+├── src/                        # PyTorch diffusion model + training
+│   ├── train.py                # Training entry (AMP, EMA, validation)
+│   ├── diffusion.py            # DDPM/DDIM + DenoiserNet
+│   ├── ops.py                  # Conv1D_SN, ResBlock1D, Self/CrossAttention
+│   ├── game_visualizer.py      # Play animation (matplotlib)
+│   └── utils.py                # DataFactory re-export
+├── ui/                         # Web UI + inference
+│   ├── app.py                  # Gradio interface
+│   ├── WGAN.py                 # PyTorch inference pipeline
+│   ├── draw_feat.py            # Ball-possession feature extraction
+│   ├── SavePos.py / Bezier.py  # Trajectory smoothing
 │   └── ...
-├── shared/                 # Shared code (DataFactory singleton)
-├── DataTranslater/         # Data conversion utilities
-├── notebooks/              # Colab training notebook
-├── data/                   # Dataset (.npy files, excluded from git)
+├── shared/                     # DataFactory (numpy, framework-agnostic)
+├── config/                     # Training YAML configuration
+├── notebooks/                  # Colab training notebook
+├── data/                       # Dataset (.npy, excluded from git)
 └── requirements.txt
 ```
-
-## Dataset
-
-### Files
-
-| File | Shape | Type | Size | Description |
-|---|---|---|---|---|
-| `50Real.npy` | (14032, 50, 11, 4) | float64 | 236MB | Ground truth plays: ball + player positions (50 timesteps) |
-| `50Seq.npy` | (14032, 50, 12) | float64 | 64MB | Offence conditioning (ball + 5 offence players x,y) |
-| `FEATURES-4.npy` | (11863, 100, 11, 4) | float64 | 398MB | Full-length ground truth (100 timesteps) |
-| `RealCond.npy` | (14032, 50, 6) | int32 | 16MB | Ball status features for ground truth plays |
-| `SeqCond.npy` | (14032, 50, 6) | int32 | 16MB | Ball status features for conditioning sequences |
-
-### Feature Layout
-
-**50Real.npy** — 4D tensor `[sample, timestep, entity, feature]`:
-
-```
-entity 0:     ball           (x, y, z, flag)
-entity 1-5:   offence A1-A5  (x, y, z, flag)
-entity 6-10:  defence B1-B5  (x, y, z, flag)
-```
-
-- `x, y`: court coordinates (normalised during training)
-- `z`: ball height (ball only; player z is 0)
-- `flag`: `1` for ball, `0` for players
-
-**50Seq.npy** — 3D tensor `[sample, timestep, feature]`, each timestep: `[ball.x, ball.y, A1.x, A1.y, A2.x, A2.y, A3.x, A3.y, A4.x, A4.y, A5.x, A5.y]`
-
-**RealCond.npy / SeqCond.npy** — 3D tensor `[sample, timestep, feature]`, one-hot ball-possession: `[dribble_by_A1, ..., dribble_by_A5, pass]`
-
-### Source
-
-Download from [Google Drive](https://drive.google.com/drive/folders/1uNPw7LOA3xENclQRtSlUftiR7tlVNOts?usp=share_link). Data consists of NBA play-by-play tracking processed into fixed-length game segments, split 9:1 into train/validation by `DataFactory`.
 
 ## Training Options
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--folder_path` | — | Output directory (checkpoints, samples, logs) |
-| `--data_path` | — | Directory containing .npy dataset files |
-| `--batch_size` | 128 | Batch size (reduce if OOM) |
-| `--max_epochs` | None | Stop after N epochs (None = run forever) |
-| `--latent_dims` | 150 | Latent z dimension |
-| `--lr_` | 1e-4 | Adam learning rate |
-| `--beta` | 0.001 | KL divergence weight (β-VAE) |
-| `--recon_weight` | 1.0 | L1 reconstruction loss weight |
-| `--n_filters` | 256 | Conv filters per layer |
-| `--n_resblock` | 8 | Residual blocks per network |
-| `--checkpoint_step` | 100 | Epochs between checkpoint saves |
-| `--vis_freq` | 5 | Epochs between sample visualizations |
+| `--data_path` | `data` | Dataset directory |
+| `--output` | `output` | Output dir (checkpoints, samples) |
+| `--max_epochs` | `null` | Stop after N epochs (null = forever) |
+| `--batch_size` | `64` | Batch size |
+| `--lr` | `1e-4` | AdamW learning rate |
+| `--n_filters` | `256` | Conv filters |
+| `--n_resblock` | `4` | Residual blocks per network |
+| `--num_heads` | `4` | Attention heads |
+| `--T` | `1000` | Diffusion timesteps |
+| `--ddim_steps` | `50` | DDIM sampling steps |
+| `--checkpoint_step` | `100` | Epochs between checkpoints |
+| `--vis_freq` | `10` | Epochs between visualizations |
+
+See `config/config.yaml` for all settings.
+
+## Architecture
+
+```
+Offensive Play (conditioning)          Random Noise
+        │                                   │
+        ▼                                   ▼
+  ┌──────────┐                      ┌──────────────┐
+  │ Cond Proj │                      │  Input Proj  │
+  └──────────┘                      └──────────────┘
+        │                                   │
+        └─────────────┬─────────────────────┘
+                      ▼
+          ┌───────────────────┐
+          │  ResBlock1D × N   │   (LayerNorm + SiLU + Conv1D)
+          │  Self-Attention   │   (temporal interactions)
+          │  Cross-Attention  │   (attend to conditioning)
+          └───────────────────┘
+                      │
+                      ▼
+               ┌──────────┐
+               │ Output   │  →  Defence (10) + Ball Features (6)
+               └──────────┘
+
+  Training:  DDPM forward process → predict noise → MSE loss
+  Inference: DDIM reverse process — 50 steps from noise to trajectory
+```
+
+## Dataset
+
+| File | Shape | Size | Description |
+|---|---|---|---|
+| `50Real.npy` | (14032, 50, 11, 4) | 236MB | Ground truth plays (ball + 10 players) |
+| `50Seq.npy` | (14032, 50, 12) | 64MB | Offence conditioning |
+| `SeqCond.npy` | (14032, 50, 6) | 16MB | Ball-possession features (conditioning) |
+| `RealCond.npy` | (14032, 50, 6) | 16MB | Ball-possession features (ground truth) |
+
+**Feature layout**: entity 0 = ball (x, y, z, flag), entities 1-5 = offence A1-A5, entities 6-10 = defence B1-B5.
+
+Download from [Google Drive](https://drive.google.com/drive/folders/1uNPw7LOA3xENclQRtSlUftiR7tlVNOts?usp=share_link). Data split 9:1 train/valid by `DataFactory`.
