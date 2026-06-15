@@ -102,6 +102,31 @@ Offensive Play (conditioning)          Random Noise
   Inference: DDIM reverse process — 50 steps from noise to trajectory
 ```
 
+## Problem Formulation
+
+```
+Input (Conditioning):            Output (Generated):
+┌──────────────────────┐        ┌──────────────────────┐
+│ Offence [T×12]        │        │ Defence [T×10]        │
+│  ball x,y             │        │  B1..B5 x,y           │
+│  A1..A5 x,y           │   →    │                       │
+│                       │        │ Ball Features [T×6]   │
+│ Seq Feat [T×6]        │        │  dribble/pass status  │
+│  ball possession      │        │                       │
+└──────────────────────┘        └──────────────────────┘
+
+  T = 50 frames (~8 seconds of gameplay)
+  Conditional time-series generation: given offense, predict defense
+```
+
+## Future Directions
+
+1. **Flow Matching** — Replace DDPM with flow matching for faster training and sampling (10-20 steps instead of 50-1000). [Reference](https://arxiv.org/abs/2210.02747)
+
+2. **Graph Neural Network for Player Interactions** — Model 10 players + ball as graph nodes with edges encoding distance and defensive matchups, replacing the current flat 16-dim vector representation. More physically grounded player movement modeling.
+
+3. **Variable-Length Sequences via Perceiver IO** — Remove the fixed 50-frame limit. Handle plays of arbitrary length with attention-based pooling over time, enabling the model to generalize across different play durations.
+
 ## Dataset
 
 | File | Shape | Size | Description |
