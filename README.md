@@ -80,6 +80,38 @@ python Main.py
 docker run --runtime=nvidia -it --rm -v $PWD:$PWD --net host nvcr.io/nvidia/tensorflow:19.06-py2 bash
 ```
 
+### Google Colab
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/TQG1997/basketball/blob/main/notebooks/train.ipynb)
+
+Or set up manually in a Colab notebook:
+
+```python
+# 1. Clone the repository
+!git clone https://github.com/TQG1997/basketball.git
+%cd basketball
+
+# 2. Install dependencies (Colab has TF2 pre-installed)
+!pip install -r requirements.txt
+
+# 3. Download dataset from Google Drive (see links below)
+#    Place the .npy files under data/
+
+# 4. Mount Google Drive for checkpoint persistence
+from google.colab import drive
+drive.mount('/content/drive')
+
+# 5. Train (checkpoints + logs saved to Drive)
+!python src/Train_Triple.py \
+    --folder_path='/content/drive/MyDrive/basketballgan/tmp' \
+    --data_path='data' \
+    --max_epochs=500 \
+    --batch_size=64
+```
+
+> **Note:** Use **Runtime → Change runtime type → T4 GPU** for free GPU acceleration.
+> Set `--max_epochs` to avoid exhausting the Colab session limit (~12h for free tier).
+
 ## Dataset
 
 ### Files
