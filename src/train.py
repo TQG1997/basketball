@@ -63,9 +63,9 @@ def auto_configure():
 
     vram_gb = torch.cuda.get_device_properties(0).total_mem / (1024**3)
 
-    # Target ~50% VRAM usage. Memory ≈ batch × filters² × resblocks
-    # Solve for batch given filters and VRAM budget
-    budget_gb = vram_gb * 0.5
+    # Target ~80% VRAM (sweet spot: enough headroom for attention spikes).
+    # 90% risks OOM from attention O(T²) intermediates + PyTorch caching.
+    budget_gb = vram_gb * 0.8
 
     # Scale filters and resblocks with √VRAM (model capacity grows slowly)
     if vram_gb >= 24:
