@@ -52,10 +52,8 @@ class BallDisk(QGraphicsEllipseItem):
 
         return pos
 
-    def pass_(self,pos):
+    def pass_(self, pos):
         print(self.tmpData)
-        #self.tmpData = pos
-        #self.tmpData.append(pos)
 
     def addSeg(self,p1,p2,p3,p4,p5):
         segData = []

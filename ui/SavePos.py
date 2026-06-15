@@ -140,32 +140,6 @@ def save_pos(data):
     pos = np.append(pos, p4, axis=1)
     pos = np.append(pos, p5, axis=1)
 
-    '''
-    if p1_full.size == 0:
-        pos = np.append(ball, p1, axis=1)
-    else:
-        pos = np.append(ball,p1_full,axis=1)
-
-    if p2_full.size == 0:
-        pos = np.append(pos, p2, axis=1)
-    else:
-        pos = np.append(pos,p2_full,axis = 1)
-
-    if p3_full.size == 0:
-        pos = np.append(pos, p3, axis=1)
-    else:
-        pos = np.append(pos, p3_full, axis=1)
-
-    if p4_full.size == 0:
-        pos = np.append(pos, p4, axis=1)
-    else:
-        pos = np.append(pos, p4_full, axis=1)
-
-    if p5_full.size == 0:
-        pos = np.append(pos, p5, axis=1)
-    else:
-        pos = np.append(pos, p5_full, axis=1)
-    '''
     pos = np.divide(pos, 10)
 
     np.save('./Points/points2.npy', pos)

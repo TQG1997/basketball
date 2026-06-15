@@ -83,16 +83,3 @@ def get_feature(real_):
     b_feat = np.array(b_feat)
 
     return b_feat
-
-
-'''
-data = np.load('./GUI/new/points2.npy')
-
-print(data.shape)
-
-feat = get_feature(data)
-
-print(feat.shape)
-print(feat)
-np.save('Bhost.npy',feat)
-'''

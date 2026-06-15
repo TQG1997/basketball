@@ -115,12 +115,6 @@ class Ui_MainWindow(object):
         self.setButton.setObjectName("setButton")
         self.setButton.clicked.connect(play.scene.setDraw)
 
-        '''
-        self.aniButton = QtWidgets.QPushButton("Save",self.widget)
-        self.aniButton.setGeometry(QtCore.QRect(170, 0, 75, 23))
-        self.aniButton.setObjectName("SaveButton")
-        self.aniButton.clicked.connect(play.scene.savePos)
-        '''
         return None
 
     def Radio_buttons(self):

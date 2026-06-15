@@ -18,8 +18,8 @@ os.environ[
 
 parser = argparse.ArgumentParser(description='Basketball VAE-GAN Training')
 
-parser.add_argument('--folder_path', type=str, default=None, help='summeray directory')
-parser.add_argument('--data_path', type=str, default=None, help='summary directory')
+parser.add_argument('--folder_path', type=str, default=None, help='summary directory')
+parser.add_argument('--data_path', type=str, default=None, help='data directory')
 parser.add_argument('--batch_size', type=int, default=128, help='batch size of input')
 parser.add_argument('--latent_dims', type=int, default=150, help='dimension of latent variable')
 parser.add_argument('--seq_length', type=int, default=50, help='sequence length')
@@ -35,6 +35,7 @@ parser.add_argument('--keep_prob', type=float, default=1.0, help='keep prob of d
 parser.add_argument('--beta', type=float, default=0.001, help='KL divergence weight (beta-VAE)')
 parser.add_argument('--recon_weight', type=float, default=1.0, help='Reconstruction loss weight (L1)')
 parser.add_argument('--vis_freq', type=int, default=5, help='number of epoches to visulize samples')
+parser.add_argument('--max_epochs', type=int, default=None, help='maximum training epochs (None = run forever)')
 parser.add_argument('--checkpoint_step', type=int, default=100, help='number of steps before saving checkpoint')
 
 class Training_config(object):
@@ -89,7 +90,7 @@ class Trainer(object):
         print('self.num_batch_valid:', self.num_batch_valid)
 
     def __call__(self):
-        while True:
+        while args.max_epochs is None or self.epoch_id < args.max_epochs:
             if self.epoch_id < args.pretrain_D == 0:  # warming
                 num_d = 10
             else:

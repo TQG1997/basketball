@@ -124,7 +124,6 @@ class Scene_(QGraphicsScene):
             self.ball.tmpData.append(self.ball.getPos())
 
             self.ball.seg += 1
-            #self.SegPos()
 
         super().mousePressEvent(e)
 

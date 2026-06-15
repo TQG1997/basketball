@@ -132,11 +132,6 @@ class MovableDisk(QGraphicsEllipseItem):
             self.last_traj.append([new_x+self.radius,new_y+self.radius])
 
             self.lines = QGraphicsItemGroup()
-            '''
-            p1 = QGraphicsEllipseItem(new_x+self.radius,new_y+self.radius, 10, 10)
-            p1.setBrush(Qt.red)
-            self.scene.addItem(p1)
-            '''
             l_rdata = rdp(self.last_traj, epsilon=1.5)
             l_rdata = np.array(l_rdata)
 
@@ -205,32 +200,7 @@ class MovableDisk(QGraphicsEllipseItem):
             self.last_traj = []
             self.temp_group.addToGroup(self.lines)
 
-            '''
-            startP = self.tempTraj[-1]
-            endP = self.tempTraj[-2]
-            polygon = QPolygonF()
-
-            rightP,leftP = ArrowHead.arrowHead(startP,endP,20,0.5)
-            polygon.append(QPointF(rightP[0],rightP[1]))
-            polygon.append(QPointF(leftP[0],leftP[1]))
-            polygon.append(QPointF(endP[0],endP[1]))
-
-            lines = QGraphicsItemGroup()
-            line = QGraphicsLineItem(QLineF(rightP[0],rightP[1] , endP[0], endP[1]))
-            line.setPen(self.pen)
-            lines.addToGroup(line)
-
-            line = QGraphicsLineItem(QLineF(leftP[0], leftP[1], endP[0], endP[1]))
-            line.setPen(self.pen)
-            poly = QGraphicsPolygonItem(polygon)
-            poly.setBrush(Qt.red)
-            lines.addToGroup(line)
-            self.scene.addItem(poly)
-
-        self.temp_group.addToGroup(self.lines)
-        '''
-
-    def calcAngle(self,p1,p2):
+    def calcAngle(self, p1, p2):
         return atan2( (p2[1]-p1[1]) , (p2[0]-p1[0]) )
 
     def calcDistance(self,p1,p2):

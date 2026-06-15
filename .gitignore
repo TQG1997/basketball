@@ -15,11 +15,11 @@ Thumbs.db
 *.swo
 
 # Model checkpoints (large)
-# Uncomment to exclude from version control:
-# ui/Data/checkpoints/
+ui/Data/checkpoints/
+ui/Data/output/
 
 # Data files (large)
-# data/
+data/
 
 # Archives
 *.zip

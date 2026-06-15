@@ -1,6 +1,6 @@
 from scipy.interpolate import spline, splprep, splev
 from pylab import *
-from scipy.misc import comb
+from scipy.special import comb
 from rdp import rdp
 
 class CreateTraj(object):
