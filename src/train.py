@@ -226,6 +226,7 @@ def parse_config():
     parser.add_argument('--ddim_steps', type=int, default=50)
     parser.add_argument('--checkpoint_step', type=int, default=100)
     parser.add_argument('--vis_freq', type=int, default=10)
+    parser.add_argument('--yes', action='store_true', help='Skip confirmation prompt')
     args = parser.parse_args()
 
     return {
@@ -248,16 +249,19 @@ def parse_config():
             'checkpoint_step': args.checkpoint_step,
             'vis_freq': args.vis_freq,
         },
-    }, args.data_path, args.output
+    }, args.data_path, args.output, args.yes
 
 
 if __name__ == '__main__':
-    config, data_path, output_path = parse_config()
+    config, data_path, output_path, skip_prompt = parse_config()
 
     if os.path.exists(output_path):
-        ans = input(f'"{output_path}" will be removed!! are you sure (y/N)? ')
-        if ans.lower() != 'y':
-            exit(0)
-        shutil.rmtree(output_path)
+        if skip_prompt:
+            shutil.rmtree(output_path)
+        else:
+            ans = input(f'"{output_path}" will be removed!! are you sure (y/N)? ')
+            if ans.lower() != 'y':
+                exit(0)
+            shutil.rmtree(output_path)
 
     train(config, data_path, output_path)
