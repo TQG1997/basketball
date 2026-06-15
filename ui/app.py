@@ -167,13 +167,36 @@ class PlayDesigner:
 
 
 _designer = PlayDesigner()
+_last_generated_video = None
+_last_sketch_video = None
+
+
+def render_sketch_video():
+    """Render current offensive sketch as animation."""
+    path, _ = _designer.build_points()
+    if path is None:
+        return None
+    points = np.load(path) / 10  # undo ×10 scale for display
+    # Build full 22-dim: ball_xy + 5 players xy
+    full = points[:, :12]  # [N, 12]
+    # Pad to 22 dims (defense = zeros)
+    padded = np.zeros((len(full), 22), dtype=np.float32)
+    padded[:, :12] = full
+    with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as f:
+        vpath = f.name
+    game_visualizer.plot_data(padded[None, :, :], SEQ_LEN, file_path=vpath, if_save=True)
+    return vpath
 
 
 def run_generate(seed):
-    """Full generate pipeline. Returns (video_path, status)."""
+    """Full generate pipeline. Returns (sim_video, sketch_video, status)."""
+    global _last_generated_video, _last_sketch_video
     path, msg = _designer.build_points()
     if path is None:
-        return None, msg
+        return None, None, msg
+
+    # Render sketch first
+    _last_sketch_video = render_sketch_video()
 
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -225,7 +248,8 @@ def run_generate(seed):
     with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as f:
         vpath = f.name
     game_visualizer.plot_data(full[None, :, :], SEQ_LEN, file_path=vpath, if_save=True)
-    return vpath, '✅ Generation complete'
+    _last_generated_video = vpath
+    return _last_generated_video, _last_sketch_video, '✅ Generation complete'
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +269,17 @@ def on_clear():
     return _format_state()
 
 def on_generate(seed):
-    return run_generate(seed)
+    sim_video, sketch_video, status = run_generate(seed)
+    if sim_video is None:
+        return None, None, status
+    return sim_video, sketch_video, status
+
+def on_view_mode_change(mode):
+    """Switch between generated simulation and sketch animation."""
+    if 'Simulation' in mode:
+        return _last_generated_video, 'Showing generated defensive play'
+    else:
+        return _last_sketch_video, 'Showing offensive sketch'
 
 def _format_state():
     lines = []
@@ -263,8 +297,8 @@ def _format_state():
 def create_ui():
     css = """
     .status-box { font-size: 0.9em; padding: 8px; background: #f0f0f0; border-radius: 6px; }
-    .player-label { font-weight: bold; font-size: 1.1em; }
     footer { display: none !important; }
+    #court-container { text-align: center; }
     """
     with gr.Blocks(title='Basketball Play Generator', theme=gr.themes.Soft(), css=css) as demo:
         gr.Markdown("""
@@ -272,54 +306,66 @@ def create_ui():
         ### Set offensive formation → Draw ball path → Generate defensive response
         """)
 
-        with gr.Row(equal_height=True):
-            # ===== LEFT: Offensive Setup =====
+        # ---- Row 1: Player positions (compact) ----
+        with gr.Row():
+            with gr.Column(scale=2):
+                pg_x = gr.Slider(47, 94, value=DEFAULT_PLAYERS['PG'][0], step=1, label='PG (Point Guard)')
             with gr.Column(scale=1):
-                gr.Markdown("### 🏃 Offensive Setup")
-
-                # Player positions
-                with gr.Group():
-                    gr.Markdown("**Player Positions** (half-court: X:47-94, Y:0-50)")
-                    with gr.Row():
-                        pg_x = gr.Slider(47, 94, value=DEFAULT_PLAYERS['PG'][0], step=1, label='PG')
-                        pg_y = gr.Slider(0, 50, value=DEFAULT_PLAYERS['PG'][1], step=1, label='y')
-                    with gr.Row():
-                        sg_x = gr.Slider(47, 94, value=DEFAULT_PLAYERS['SG'][0], step=1, label='SG')
-                        sg_y = gr.Slider(0, 50, value=DEFAULT_PLAYERS['SG'][1], step=1, label='y')
-                    with gr.Row():
-                        sf_x = gr.Slider(47, 94, value=DEFAULT_PLAYERS['SF'][0], step=1, label='SF')
-                        sf_y = gr.Slider(0, 50, value=DEFAULT_PLAYERS['SF'][1], step=1, label='y')
-                    with gr.Row():
-                        pf_x = gr.Slider(47, 94, value=DEFAULT_PLAYERS['PF'][0], step=1, label='PF')
-                        pf_y = gr.Slider(0, 50, value=DEFAULT_PLAYERS['PF'][1], step=1, label='y')
-                    with gr.Row():
-                        c_x = gr.Slider(47, 94, value=DEFAULT_PLAYERS['C'][0], step=1, label='C')
-                        c_y = gr.Slider(0, 50, value=DEFAULT_PLAYERS['C'][1], step=1, label='y')
-
-                # Ball trajectory court
-                gr.Markdown("**🏀 Ball Trajectory** — click on court to place waypoints")
-                court_img = gr.Image(
-                    value=COURT_IMAGE if os.path.exists(COURT_IMAGE) else None,
-                    label='Right half-court (click to place ball path)',
-                    type='filepath', height=300, show_label=False)
-
-                state_display = gr.Markdown(_format_state(), elem_classes=['status-box'])
-
-                with gr.Row():
-                    clear_btn = gr.Button('🔄 Reset All', variant='secondary')
-                    gen_btn = gr.Button('⚡ Generate Defense', variant='primary', scale=2)
-
-            # ===== RIGHT: Result =====
+                pg_y = gr.Slider(0, 50, value=DEFAULT_PLAYERS['PG'][1], step=1, label='')
+        with gr.Row():
+            with gr.Column(scale=2):
+                sg_x = gr.Slider(47, 94, value=DEFAULT_PLAYERS['SG'][0], step=1, label='SG (Shooting Guard)')
             with gr.Column(scale=1):
-                gr.Markdown("### 🎬 Generated Defense")
-                video_out = gr.Video(label='Defensive Play Simulation', height=480)
-                status_out = gr.Textbox(label='Status', value='Ready — set players and draw ball path', interactive=False)
-                seed_slider = gr.Slider(0, 200, value=0, step=1, label='🎲 Random Seed (same seed = same result)')
+                sg_y = gr.Slider(0, 50, value=DEFAULT_PLAYERS['SG'][1], step=1, label='')
+        with gr.Row():
+            with gr.Column(scale=2):
+                sf_x = gr.Slider(47, 94, value=DEFAULT_PLAYERS['SF'][0], step=1, label='SF (Small Forward)')
+            with gr.Column(scale=1):
+                sf_y = gr.Slider(0, 50, value=DEFAULT_PLAYERS['SF'][1], step=1, label='')
+        with gr.Row():
+            with gr.Column(scale=2):
+                pf_x = gr.Slider(47, 94, value=DEFAULT_PLAYERS['PF'][0], step=1, label='PF (Power Forward)')
+            with gr.Column(scale=1):
+                pf_y = gr.Slider(0, 50, value=DEFAULT_PLAYERS['PF'][1], step=1, label='')
+        with gr.Row():
+            with gr.Column(scale=2):
+                c_x = gr.Slider(47, 94, value=DEFAULT_PLAYERS['C'][0], step=1, label='C (Center)')
+            with gr.Column(scale=1):
+                c_y = gr.Slider(0, 50, value=DEFAULT_PLAYERS['C'][1], step=1, label='')
+
+        # ---- Row 2: Large centered court ----
+        gr.Markdown("### 🏀 Ball Trajectory — click on court to draw")
+        court_img = gr.Image(
+            value=COURT_IMAGE if os.path.exists(COURT_IMAGE) else None,
+            label='', type='filepath', height=420, show_label=False,
+            elem_id='court-container')
+
+        with gr.Row():
+            state_display = gr.Markdown(_format_state(), elem_classes=['status-box'])
+
+        # ---- Row 3: Controls ----
+        with gr.Row():
+            clear_btn = gr.Button('🔄 Reset All', variant='secondary', size='lg')
+            seed_slider = gr.Slider(0, 200, value=0, step=1, label='🎲 Seed')
+            gen_btn = gr.Button('⚡ Generate Defense', variant='primary', size='lg')
+
+        # ---- Row 4: Result (2 modes like old PyQt5) ----
+        gr.Markdown("---")
+        with gr.Row():
+            view_mode = gr.Radio(
+                choices=['🎬 Generated Simulation', '✏️ Sketch Animation'],
+                value='🎬 Generated Simulation', label='View Mode',
+                interactive=True)
+
+        video_out = gr.Video(label='', height=460)
+        status_out = gr.Textbox(
+            label='Status',
+            value='Ready — adjust players, click court to draw ball path (≥3 points), then Generate',
+            interactive=False)
 
         # ---- Event bindings ----
         court_img.select(on_court_click, outputs=[state_display])
 
-        # Player slider sync to designer
         all_sliders = [pg_x, pg_y, sg_x, sg_y, sf_x, sf_y, pf_x, pf_y, c_x, c_y]
         player_names = ['PG', 'PG', 'SG', 'SG', 'SF', 'SF', 'PF', 'PF', 'C', 'C']
         for i, slider in enumerate(all_sliders):
@@ -334,14 +380,21 @@ def create_ui():
                 return update
             slider.change(make_update(), inputs=[slider])
 
-        clear_btn.click(on_clear, outputs=[state_display])
-        gen_btn.click(on_generate, inputs=[seed_slider], outputs=[video_out, status_out])
+        sketch_video = gr.Video(label='', height=460, visible=False)
 
-        # ---- Tips ----
-        gr.Markdown("""
-        ---
-        **How to use:** ① Adjust player positions → ② Click court to draw ball path (≥3 points) → ③ Set seed → ④ Generate
-        """)
+        def on_gen_wrapper(seed):
+            sim_video, sketch_v, status = on_generate(seed)
+            return sim_video, sketch_v, status
+
+        clear_btn.click(on_clear, outputs=[state_display])
+        gen_btn.click(
+            on_gen_wrapper,
+            inputs=[seed_slider],
+            outputs=[video_out, sketch_video, status_out])
+        view_mode.change(
+            on_view_mode_change,
+            inputs=[view_mode],
+            outputs=[video_out, status_out])
 
     return demo
 
