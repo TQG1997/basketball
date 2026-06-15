@@ -1,4 +1,4 @@
-# BasketballGAN
+# Basketball Play Generator
 
 ### Generate defensive basketball play simulations from offensive sketches.
 
