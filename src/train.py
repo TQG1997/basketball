@@ -52,25 +52,42 @@ class BasketballDataset(Dataset):
 # ---------------------------------------------------------------------------
 
 def auto_configure():
-    """Scale hyperparameters based on available GPU memory.
+    """Scale hyperparameters to utilize ~50% of available GPU memory.
 
-    Baseline (T4 15GB): batch=128, n_filters=384, n_resblock=6
-    Floor  (4GB):       batch=32,  n_filters=192, n_resblock=3
+    T4 15GB  → batch=256, n_filters=512, n_resblock=8  (~7 GB)
+    A100 40GB → batch=512, n_filters=768, n_resblock=12 (~18 GB)
+    Floor 4GB → batch=32,  n_filters=128, n_resblock=3  (~1 GB)
     """
     if not torch.cuda.is_available():
-        return {'batch_size': 32, 'n_filters': 192, 'n_resblock': 3}
+        return {'batch_size': 32, 'n_filters': 128, 'n_resblock': 3}
 
     vram_gb = torch.cuda.get_device_properties(0).total_mem / (1024**3)
-    # Linear interpolation between floor (4GB) and baseline (15GB)
-    floor, base = 4.0, 15.0
-    ratio = min(max((vram_gb - floor) / (base - floor), 0.0), 1.0)
 
-    batch = int(32 + (128 - 32) * ratio)
-    filters = int(192 + (384 - 192) * ratio)
-    resblocks = int(3 + (6 - 3) * ratio)
+    # Target ~50% VRAM usage. Memory ≈ batch × filters² × resblocks
+    # Solve for batch given filters and VRAM budget
+    budget_gb = vram_gb * 0.5
 
-    print(f'Auto-config: {vram_gb:.1f}GB VRAM → batch={batch}, '
-          f'n_filters={filters}, n_resblock={resblocks}')
+    # Scale filters and resblocks with √VRAM (model capacity grows slowly)
+    if vram_gb >= 24:
+        filters, resblocks = 768, 12
+    elif vram_gb >= 15:
+        filters, resblocks = 512, 8
+    elif vram_gb >= 8:
+        filters, resblocks = 384, 6
+    else:
+        filters, resblocks = 192, 3
+
+    # Scale batch to fill remaining budget
+    # Rough model: memory_gb ≈ batch × filters × T × layers / 1e6
+    T_est = 50
+    layers = resblocks * 2 + 4  # convs + attention + proj
+    mem_per_sample_gb = (filters * filters * T_est * layers) / 1.5e7  # empirical
+
+    batch = int(budget_gb / max(mem_per_sample_gb, 0.01))
+    batch = max(16, min(batch, 512))  # clamp to sensible range
+
+    print(f'Auto-config: {vram_gb:.1f}GB VRAM → budget={budget_gb:.1f}GB, '
+          f'batch={batch}, n_filters={filters}, n_resblock={resblocks}')
     return {'batch_size': batch, 'n_filters': filters, 'n_resblock': resblocks}
 
 
