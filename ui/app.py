@@ -216,6 +216,12 @@ class ClickCollector:
         self.clicks.append((court_x, court_y))
         return self._format_clicks()
 
+    def _format_clicks(self):
+        if not self.clicks:
+            return 'No points placed yet'
+        lines = [f'{i+1}. ({x:.1f}, {y:.1f})' for i, (x, y) in enumerate(self.clicks)]
+        return '\n'.join(lines)
+
     def clear(self):
         self.clicks = []
         return ''
