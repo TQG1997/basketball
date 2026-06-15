@@ -1,62 +1,23 @@
-"""BasketballGAN training entry point (TF 2.16+ / Keras 3)."""
+"""BasketballGAN training entry point (TF 2.16+ / Keras 3 / Hydra / WandB).
 
-import argparse
+Usage:
+    python Train_Triple.py                                    # default config
+    python Train_Triple.py model.latent_dims=64 training.batch_size=32
+    python Train_Triple.py training.max_epochs=500 wandb.enabled=true
+"""
+
 import os
 import shutil
-import time
+import hydra
+from omegaconf import DictConfig, OmegaConf
 import numpy as np
 import tensorflow as tf
 import matplotlib
 matplotlib.use('agg')
-import matplotlib.pyplot as plt
 
 from utils import DataFactory
 from ThreeDiscrim import VAEGAN_Model
 import game_visualizer
-
-
-parser = argparse.ArgumentParser(description='Basketball VAE-GAN Training')
-
-parser.add_argument('--folder_path', type=str, default=None, help='summary directory')
-parser.add_argument('--data_path', type=str, default=None, help='data directory')
-parser.add_argument('--batch_size', type=int, default=128, help='batch size')
-parser.add_argument('--latent_dims', type=int, default=150, help='latent variable dimension')
-parser.add_argument('--seq_length', type=int, default=50, help='sequence length')
-parser.add_argument('--features_', type=int, default=12, help='number of offence features')
-parser.add_argument('--features_d', type=int, default=10, help='number of defence features')
-parser.add_argument('--n_resblock', type=int, default=8, help='number of residual blocks')
-parser.add_argument('--pretrain_D', type=int, default=25, help='epochs to pretrain D')
-parser.add_argument('--train_D', type=int, default=5, help='D updates per G update')
-parser.add_argument('--lr_', type=float, default=1e-4, help='learning rate')
-parser.add_argument('--lambda_', type=float, default=1.0, help='decaying lambda (unused)')
-parser.add_argument('--n_filters', type=int, default=256, help='conv filters')
-parser.add_argument('--keep_prob', type=float, default=1.0, help='dropout keep prob (unused)')
-parser.add_argument('--beta', type=float, default=0.001, help='KL divergence weight')
-parser.add_argument('--recon_weight', type=float, default=1.0, help='reconstruction loss weight (L1)')
-parser.add_argument('--vis_freq', type=int, default=5, help='epochs between visualizations')
-parser.add_argument('--max_epochs', type=int, default=None, help='max training epochs (None = forever)')
-parser.add_argument('--checkpoint_step', type=int, default=100, help='epochs between checkpoint saves')
-
-
-class TrainingConfig:
-    def __init__(self, args):
-        self.folder_path = args.folder_path
-        self.data_path = args.data_path
-        self.batch_size = args.batch_size
-        self.latent_dims = args.latent_dims
-        self.seq_length = args.seq_length
-        self.features_ = args.features_
-        self.features_d = args.features_d
-        self.n_filters = args.n_filters
-        self.lr_ = args.lr_
-        self.keep_prob = args.keep_prob
-        self.beta = args.beta
-        self.recon_weight = args.recon_weight
-        self.n_resblock = args.n_resblock
-
-    def show(self):
-        for k, v in vars(self).items():
-            print(f'  {k}: {v}')
 
 
 def z_samples(batch_size, latent_dims):
@@ -64,29 +25,68 @@ def z_samples(batch_size, latent_dims):
 
 
 class Trainer:
-    def __init__(self, data_factory, config, checkpoint_path, sample_path):
+    def __init__(self, data_factory, cfg, checkpoint_path, sample_path):
         self.data_factory = data_factory
-        self.config = config
+        self.cfg = cfg
         self.checkpoint_path = checkpoint_path
         self.sample_path = sample_path
-        self.model = VAEGAN_Model(config)
+
+        # Build config object for model
+        model_cfg = self._make_model_config(cfg)
+        self.model = VAEGAN_Model(model_cfg)
+
+        self.bs = cfg.training.batch_size
         self.num_data = data_factory.train_data['A'].shape[0]
-        self.num_batch = self.num_data // args.batch_size
-        self.num_batch_valid = data_factory.valid_data['A'].shape[0] // args.batch_size
+        self.num_batch = self.num_data // self.bs
+        self.num_batch_valid = data_factory.valid_data['A'].shape[0] // self.bs
         self.epoch_id = 0
         self.batch_id = 0
         self.batch_id_valid = 0
-        print(f'num_batch: {self.num_batch}')
-        print(f'num_batch_valid: {self.num_batch_valid}')
+
+        # WandB
+        self.use_wandb = cfg.wandb.enabled
+        if self.use_wandb:
+            import wandb
+            self.wandb = wandb
+            self.wandb.init(
+                project=cfg.wandb.project,
+                entity=cfg.wandb.entity,
+                config=OmegaConf.to_container(cfg, resolve=True))
+            # Watch model gradients
+            self.wandb_run = self.wandb
+
+        print(f'Batches per epoch: {self.num_batch}')
+        print(f'Validation batches: {self.num_batch_valid}')
+
+    @staticmethod
+    def _make_model_config(cfg):
+        """Build a simple config object for VAEGAN_Model."""
+        class MC:
+            pass
+        mc = MC()
+        m = cfg.model
+        t = cfg.training
+        p = cfg.paths
+        mc.batch_size = t.batch_size
+        mc.seq_length = t.seq_length
+        mc.latent_dims = m.latent_dims
+        mc.n_filters = m.n_filters
+        mc.n_resblock = m.n_resblock
+        mc.lr_ = t.lr_
+        mc.beta = t.beta
+        mc.recon_weight = t.recon_weight
+        mc.features_ = m.features_
+        mc.features_d = m.features_d
+        mc.keep_prob = 1.0
+        mc.folder_path = p.folder_path
+        return mc
 
     def _get_batch(self, data_dict, seq_data, feat_data, real_feat_data, idx):
-        """Extract a batch and apply the positional indexing hack."""
-        batch = data_dict['A'][idx:idx + args.batch_size]
-        batch_d = data_dict['B'][idx:idx + args.batch_size]
-        seq = seq_data[idx:idx + args.batch_size]
-        feat = feat_data[idx:idx + args.batch_size]
-        real_feat = real_feat_data[idx:idx + args.batch_size]
-
+        batch = data_dict['A'][idx:idx + self.bs]
+        batch_d = data_dict['B'][idx:idx + self.bs]
+        seq = seq_data[idx:idx + self.bs]
+        feat = feat_data[idx:idx + self.bs]
+        real_feat = real_feat_data[idx:idx + self.bs]
         # Drop ball z (index 2): [B,T,13] → [B,T,12]
         batch = batch[:, :, [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]]
         return (tf.constant(batch, dtype=tf.float32),
@@ -96,21 +96,21 @@ class Trainer:
                 tf.constant(real_feat[:, :, :], dtype=tf.float32))
 
     def _prep_basket_right(self):
-        """Get normalized basket right position from DataFactory."""
         br = tf.constant(
             [self.data_factory.BASKET_RIGHT[0],
-             self.data_factory.BASKET_RIGHT[1]],
-            dtype=tf.float32)
+             self.data_factory.BASKET_RIGHT[1]], dtype=tf.float32)
         return br
 
     def __call__(self):
         br = self._prep_basket_right()
-        while args.max_epochs is None or self.epoch_id < args.max_epochs:
-            # Determine D steps (warmup: 10, normal: train_D)
-            if self.epoch_id < args.pretrain_D:
-                num_d = 10
-            else:
-                num_d = args.train_D
+        max_epochs = self.cfg.training.max_epochs
+        pretrain_d = self.cfg.training.pretrain_D
+        train_d = self.cfg.training.train_D
+        ckpt_step = self.cfg.training.checkpoint_step
+        vis_freq = self.cfg.training.vis_freq
+
+        while max_epochs is None or self.epoch_id < max_epochs:
+            num_d = 10 if self.epoch_id < pretrain_d else train_d
 
             # ---- Train D ----
             for _ in range(num_d):
@@ -119,7 +119,7 @@ class Trainer:
                     self.data_factory.seq_train,
                     self.data_factory.f_train,
                     self.data_factory.rf_train,
-                    self.batch_id * args.batch_size)
+                    self.batch_id * self.bs)
                 self.model.train_D(real, real_d, seq, seq_feat, real_feat, br)
 
             # ---- Train G ----
@@ -128,21 +128,31 @@ class Trainer:
                 self.data_factory.seq_train,
                 self.data_factory.f_train,
                 self.data_factory.rf_train,
-                self.batch_id * args.batch_size)
+                self.batch_id * self.bs)
             g_losses = self.model.train_G(real, real_d, seq, seq_feat, real_feat, br)
 
-            self._update_batch_id_and_shuffle()
+            self._update_batch_id_and_shuffle(ckpt_step, vis_freq)
 
             # ---- Validation ----
-            vidx = self.batch_id_valid * args.batch_size
+            vidx = self.batch_id_valid * self.bs
             vreal, vreal_d, vseq, vseq_feat, vreal_feat = self._get_batch(
                 self.data_factory.valid_data,
                 self.data_factory.seq_valid,
                 self.data_factory.f_valid,
                 self.data_factory.rf_valid,
                 vidx)
-            self.model.valid_loss(vreal, vreal_d, vseq, vseq_feat, vreal_feat, br)
+            vlosses = self.model.valid_loss(vreal, vreal_d, vseq, vseq_feat, vreal_feat, br)
             self._update_batch_id_valid_and_shuffle()
+
+            # ---- Log to WandB ----
+            if self.use_wandb and self.batch_id == 0:
+                self.wandb.log({
+                    'epoch': self.epoch_id,
+                    **{f'G/{k}': v.numpy().item() if hasattr(v, 'numpy') else v
+                       for k, v in g_losses.items()},
+                    **{f'V/{k}': v.numpy().item() if hasattr(v, 'numpy') else v
+                       for k, v in vlosses.items()},
+                }, commit=False)
 
     def _update_batch_id_valid_and_shuffle(self):
         self.batch_id_valid += 1
@@ -150,31 +160,28 @@ class Trainer:
             self.batch_id_valid = 0
             self.data_factory.shuffle_valid()
 
-    def _update_batch_id_and_shuffle(self):
+    def _update_batch_id_and_shuffle(self, ckpt_step, vis_freq):
         self.batch_id += 1
         if self.batch_id >= self.num_batch:
             self.epoch_id += 1
             self.batch_id = 0
             self.data_factory.shuffle_train()
 
-            # Save checkpoint
-            if self.epoch_id % args.checkpoint_step == 0:
+            if self.epoch_id % ckpt_step == 0:
                 ckpt = os.path.join(self.checkpoint_path, 'model.ckpt')
                 self.model.save_model(ckpt)
                 print(f'Saved checkpoint epoch {self.epoch_id}: {ckpt}')
 
-            # Generate visualization sample
-            if self.epoch_id % args.vis_freq == 0:
+            if self.epoch_id % vis_freq == 0:
                 print(f'--- Epoch {self.epoch_id} ---')
                 self._visualize()
 
     def _visualize(self):
-        """Generate and save a sample play animation."""
-        data_idx = self.batch_id * args.batch_size
-        seq = self.data_factory.seq_train[data_idx:data_idx + args.batch_size]
-        feat = self.data_factory.f_train[data_idx:data_idx + args.batch_size]
+        data_idx = self.batch_id * self.bs
+        seq = self.data_factory.seq_train[data_idx:data_idx + self.bs]
+        feat = self.data_factory.f_train[data_idx:data_idx + self.bs]
 
-        z = z_samples(args.batch_size, args.latent_dims)
+        z = z_samples(self.bs, self.cfg.model.latent_dims)
         fake = self.model.reconstruct(
             tf.constant(seq, dtype=tf.float32),
             tf.constant(feat[:, :, :], dtype=tf.float32),
@@ -184,48 +191,57 @@ class Trainer:
         sample = fake_np[:, :, :22]
         samples = self.data_factory.recover_BALL_and_A(sample)
         samples = self.data_factory.recover_B(samples)
-        game_visualizer.plot_data(
-            samples[0], args.seq_length,
-            file_path=os.path.join(
-                self.sample_path, f'reconstruct{self.epoch_id}.mp4'),
-            if_save=True)
+        fname = os.path.join(self.sample_path, f'reconstruct{self.epoch_id}.mp4')
+        game_visualizer.plot_data(samples[0], self.cfg.training.seq_length,
+                                  file_path=fname, if_save=True)
+
+        if self.use_wandb:
+            self.wandb.log({'sample': self.wandb.Video(fname)}, commit=False)
 
 
-def main(args):
-    real_data = np.load(os.path.join(args.data_path, '50Real.npy'))[:, :args.seq_length, :, :]
-    seq_data = np.load(os.path.join(args.data_path, '50Seq.npy'))
-    features_ = np.load(os.path.join(args.data_path, 'SeqCond.npy'))
-    real_feat = np.load(os.path.join(args.data_path, 'RealCond.npy'))
+@hydra.main(version_base="1.3", config_path="../config", config_name="config")
+def main(cfg: DictConfig):
+    # Resolve paths relative to project root
+    hydra_cfg = hydra.core.hydra_config.HydraConfig.get() if hydra else None
+    folder_path = os.path.abspath(cfg.paths.folder_path)
+    data_path = os.path.abspath(cfg.paths.data_path)
 
-    print(f'Real Data:  {real_data.shape}')
-    print(f'Seq Data:   {seq_data.shape}')
-    print(f'Real Feat:  {real_feat.shape}')
-    print(f'Seq Feat:   {features_.shape}')
+    # --- Output directory ---
+    if os.path.exists(folder_path):
+        ans = input(f'"{folder_path}" will be removed!! are you sure (y/N)? ')
+        if ans.lower() == 'y':
+            shutil.rmtree(folder_path)
+        else:
+            exit(0)
+    checkpoint_path = os.path.join(folder_path, 'Checkpoints')
+    sample_path = os.path.join(folder_path, 'Samples')
+    os.makedirs(checkpoint_path, exist_ok=True)
+    os.makedirs(sample_path, exist_ok=True)
 
-    data_factory = DataFactory(
-        real_data=real_data, seq_data=seq_data,
-        features_=features_, real_feat=real_feat)
+    print(OmegaConf.to_yaml(cfg))
 
-    config = TrainingConfig(args)
-    config.show()
+    # --- Load data ---
+    real_data = np.load(os.path.join(data_path, '50Real.npy'))[:, :cfg.training.seq_length, :, :]
+    seq_data = np.load(os.path.join(data_path, '50Seq.npy'))
+    features_ = np.load(os.path.join(data_path, 'SeqCond.npy'))
+    real_feat = np.load(os.path.join(data_path, 'RealCond.npy'))
 
-    trainer = Trainer(data_factory, config, CHECKPOINT_PATH, SAMPLE_PATH)
+    data_factory = DataFactory(real_data=real_data, seq_data=seq_data,
+                               features_=features_, real_feat=real_feat)
+
+    # --- Mixed precision (FP16 on T4, BF16 on A100) ---
+    tf.keras.mixed_precision.set_global_policy('mixed_float16')
+    print(f'Compute dtype: {tf.keras.mixed_precision.global_policy().compute_dtype}')
+    print(f'Variable dtype: {tf.keras.mixed_precision.global_policy().variable_dtype}')
+
+    # --- Train ---
+    trainer = Trainer(data_factory, cfg, checkpoint_path, sample_path)
     trainer()
+
+    if cfg.wandb.enabled:
+        import wandb
+        wandb.finish()
 
 
 if __name__ == '__main__':
-    args = parser.parse_args()
-    CHECKPOINT_PATH = os.path.join(args.folder_path, 'Checkpoints')
-    SAMPLE_PATH = os.path.join(args.folder_path, 'Samples')
-
-    if os.path.exists(args.folder_path):
-        ans = input(f'"{args.folder_path}" will be removed!! are you sure (y/N)? ')
-        if ans.lower() == 'y':
-            shutil.rmtree(args.folder_path)
-            print(f'rm -rf "{args.folder_path}" complete!')
-        else:
-            exit()
-
-    os.makedirs(CHECKPOINT_PATH, exist_ok=True)
-    os.makedirs(SAMPLE_PATH, exist_ok=True)
-    main(args)
+    main()

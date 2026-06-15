@@ -41,11 +41,11 @@ class Encoder(tf.keras.Model):
             for i in range(n_resblock)
         ]
         self.dense_mean = tf.keras.layers.Dense(
-            latent_dims, activation=None,
+            latent_dims, activation=None, dtype='float32',
             kernel_initializer=tf.keras.initializers.GlorotNormal(),
             bias_initializer='zeros', name='z_mean')
         self.dense_log_var = tf.keras.layers.Dense(
-            latent_dims, activation=None,
+            latent_dims, activation=None, dtype='float32',
             kernel_initializer=tf.keras.initializers.GlorotNormal(),
             bias_initializer='zeros', name='z_log_var')
 
@@ -86,7 +86,7 @@ class Generator(tf.keras.Model):
             ResidualBlock(n_filters, name=f'G_Res{i}')
             for i in range(n_resblock)
         ]
-        self.output_conv = Conv1D_SN(28, kernel_size=1, name='conv_result')
+        self.output_conv = Conv1D_SN(28, kernel_size=1, dtype='float32', name='conv_result')
 
     def call(self, seq, seq_feat, z, training=None):
         # Conditioning: seq + seq_feat
@@ -130,7 +130,7 @@ class Discriminator(tf.keras.Model):
             ResidualBlock(n_filters, name=f'disc_Res{i}')
             for i in range(n_resblock)
         ]
-        self.conv_output = Conv1D_SN(1, kernel_size=1, name='conv_output')
+        self.conv_output = Conv1D_SN(1, kernel_size=1, dtype='float32', name='conv_output')
 
     def call(self, conds, x, training=None):
         inp = tf.concat([conds, x], axis=-1)

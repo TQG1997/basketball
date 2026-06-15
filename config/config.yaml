@@ -1,0 +1,33 @@
+# BasketballGAN — Hydra configuration
+# Override any param via CLI: python train.py model.latent_dims=64 training.batch_size=32
+
+defaults:
+  - _self_
+
+model:
+  latent_dims: 150
+  n_filters: 256
+  n_resblock: 8
+  features_: 12      # offence features (ball xy + 5 players xy)
+  features_d: 10      # defence features (5 players xy)
+
+training:
+  batch_size: 128
+  seq_length: 50
+  lr_: 1.0e-4
+  beta: 0.001         # KL divergence weight
+  recon_weight: 1.0   # L1 reconstruction weight
+  pretrain_D: 25      # epochs to pretrain discriminator
+  train_D: 5          # D updates per G update
+  max_epochs: null    # null = run forever
+  checkpoint_step: 100
+  vis_freq: 5
+
+paths:
+  folder_path: output
+  data_path: data
+
+wandb:
+  enabled: false
+  project: basketballgan
+  entity: null        # your wandb username/team

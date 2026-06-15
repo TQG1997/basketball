@@ -17,6 +17,11 @@ h5py>=3.8
 # UI trajectory simplification
 rdp>=0.8
 
+# Experiment management
+hydra-core>=1.3
+omegaconf>=2.3
+wandb>=0.16
+
 # Other
 packaging>=23
 protobuf>=3.20
