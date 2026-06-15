@@ -1,5 +1,8 @@
-# BasketballGAN — Hydra configuration
-# Override any param via CLI: python train.py model.latent_dims=64 training.batch_size=32
+# BasketballGAN — configuration
+# Override any param via CLI or YAML
+
+# Framework: "torch" (recommended) or "tensorflow" (legacy VAE-GAN)
+framework: torch
 
 defaults:
   - _self_
