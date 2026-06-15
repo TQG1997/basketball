@@ -51,6 +51,29 @@ class BasketballDataset(Dataset):
 #   Training entry
 # ---------------------------------------------------------------------------
 
+def auto_configure():
+    """Scale hyperparameters based on available GPU memory.
+
+    Baseline (T4 15GB): batch=128, n_filters=384, n_resblock=6
+    Floor  (4GB):       batch=32,  n_filters=192, n_resblock=3
+    """
+    if not torch.cuda.is_available():
+        return {'batch_size': 32, 'n_filters': 192, 'n_resblock': 3}
+
+    vram_gb = torch.cuda.get_device_properties(0).total_mem / (1024**3)
+    # Linear interpolation between floor (4GB) and baseline (15GB)
+    floor, base = 4.0, 15.0
+    ratio = min(max((vram_gb - floor) / (base - floor), 0.0), 1.0)
+
+    batch = int(32 + (128 - 32) * ratio)
+    filters = int(192 + (384 - 192) * ratio)
+    resblocks = int(3 + (6 - 3) * ratio)
+
+    print(f'Auto-config: {vram_gb:.1f}GB VRAM → batch={batch}, '
+          f'n_filters={filters}, n_resblock={resblocks}')
+    return {'batch_size': batch, 'n_filters': filters, 'n_resblock': resblocks}
+
+
 def train(config, data_path, output_path):
     """Main training loop with EMA, AMP, and DDIM visualization."""
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -226,13 +249,17 @@ def parse_config():
     parser.add_argument('--ddim_steps', type=int, default=50)
     parser.add_argument('--checkpoint_step', type=int, default=100)
     parser.add_argument('--vis_freq', type=int, default=10)
+    parser.add_argument('--auto', action='store_true', help='Auto-tune params for GPU VRAM')
     parser.add_argument('--yes', action='store_true', help='Skip confirmation prompt')
     args = parser.parse_args()
 
+    # Auto-configure based on GPU VRAM
+    auto = auto_configure() if args.auto else {}
+
     return {
         'model': {
-            'n_filters': args.n_filters,
-            'n_resblock': args.n_resblock,
+            'n_filters': auto.get('n_filters', args.n_filters),
+            'n_resblock': auto.get('n_resblock', args.n_resblock),
             'num_heads': args.num_heads,
         },
         'diffusion': {
@@ -242,7 +269,7 @@ def parse_config():
             'ddim_steps': args.ddim_steps,
         },
         'training': {
-            'batch_size': args.batch_size,
+            'batch_size': auto.get('batch_size', args.batch_size),
             'seq_length': 50,
             'lr_': args.lr,
             'max_epochs': args.max_epochs,
