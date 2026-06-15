@@ -56,9 +56,7 @@ Basketball/
 ├── ui/                         # Web UI + inference
 │   ├── app.py                  # Gradio interface
 │   ├── inference.py            # PyTorch inference pipeline
-│   ├── draw_feat.py            # Ball-possession feature extraction
-│   ├── SavePos.py / Bezier.py  # Trajectory smoothing
-│   └── ...
+│   └── draw_feat.py            # Ball-possession feature extraction
 ├── shared/                     # DataFactory (numpy, framework-agnostic)
 ├── config/                     # Training YAML configuration
 ├── notebooks/                  # Colab training notebook

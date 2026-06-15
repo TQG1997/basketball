@@ -76,10 +76,9 @@ Data indexing hack: offence [N,T,13] → drop ball z (index 2) → [N,T,12]
 
 ### UI (`ui/app.py`, `ui/inference.py`)
 
-- Gradio web app with 3 tabs: file upload, interactive click-to-place, model info
-- `ModelManager`: lazy-loads diffusion model + DataFactory
-- `ClickCollector`: pixel→court coordinate conversion, auto-places dummy offence players
+- `app.py`: Gradio web app with 3 tabs (file upload, interactive click, model info)
 - `inference.py`: PyTorch pipeline (load model → normalize → DDIM sample → recover → save)
+- `draw_feat.py`: Ball-possession feature extraction from sketch coordinates
 
 ## Key parameters
 
