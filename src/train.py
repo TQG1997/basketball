@@ -1,4 +1,4 @@
-"""BasketballGAN — PyTorch Lightning diffusion training.
+"""BasketballGAN — PyTorch diffusion training.
 
 Usage:
     python src/train.py --data_path=data --output=output --max_epochs=500
@@ -20,137 +20,39 @@ from shared import DataFactory
 from diffusion import GaussianDiffusion, DenoiserNet
 import game_visualizer
 
-# Optional: PyTorch Lightning
-try:
-    import lightning as pl
-    HAS_LIGHTNING = True
-except ImportError:
-    HAS_LIGHTNING = False
-
 
 # ---------------------------------------------------------------------------
-#   Dataset
+#   Dataset (pre-computed concatenation for speed)
 # ---------------------------------------------------------------------------
 
 class BasketballDataset(Dataset):
-    """Yields (target, conditioning) pairs from numpy data.
+    """Yields (target, conditioning) pairs.
 
     target:       defence(10) + ball_features(6) = 16 dims
     conditioning: offence(12) + seq_feat(6) = 18 dims
     """
 
     def __init__(self, data, seq, feat, real_feat):
-        self.offence = data['A'][:, :, [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]]
-        self.defence = data['B']
-        self.seq = seq
-        self.feat = feat[:, :, :]
-        self.real_feat = real_feat[:, :, :]
+        # Drop ball z (index 2): [B,T,13] → [B,T,12]
+        offence = data['A'][:, :, [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]]
+        # Pre-concatenate for speed (avoid np.concatenate per __getitem__)
+        self.target = np.concatenate([data['B'], real_feat[:, :, :]], axis=-1).astype(np.float32)
+        self.conds = np.concatenate([offence, feat[:, :, :]], axis=-1).astype(np.float32)
 
     def __len__(self):
-        return len(self.offence)
+        return len(self.target)
 
     def __getitem__(self, idx):
-        target = np.concatenate([self.defence[idx], self.real_feat[idx]], axis=-1)
-        conds = np.concatenate([self.offence[idx], self.feat[idx]], axis=-1)
-        return (torch.from_numpy(target).float(),
-                torch.from_numpy(conds).float())
+        return (torch.from_numpy(self.target[idx]),
+                torch.from_numpy(self.conds[idx]))
 
 
 # ---------------------------------------------------------------------------
-#   Lightning Module
-# ---------------------------------------------------------------------------
-
-class BasketballDiffusion(pl.LightningModule if HAS_LIGHTNING else object):
-    """PyTorch Lightning module for basketball trajectory diffusion."""
-
-    def __init__(self, config):
-        if HAS_LIGHTNING:
-            super().__init__()
-            self.save_hyperparameters()
-        else:
-            super().__init__()
-
-        self.cfg = config
-        m = config['model']
-        d = config['diffusion']
-        t = config['training']
-
-        self.diffusion = GaussianDiffusion(
-            T=d['T'], beta_start=d['beta_start'], beta_end=d['beta_end'])
-
-        self.denoiser = DenoiserNet(
-            in_dim=16, cond_dim=18,
-            n_filters=m['n_filters'],
-            n_resblock=m['n_resblock'],
-            num_heads=m['num_heads'],
-            T=d['T'])
-
-        self.lr = t['lr_']
-        self.ddim_steps = d['ddim_steps']
-        self.seq_len = t['seq_length']
-
-        # EMA
-        self.ema_decay = config.get('ema_decay', 0.9999)
-        self.ema_model = None
-
-    def forward(self, conds, steps=None):
-        """Generate via DDIM sampling."""
-        if steps is None:
-            steps = self.ddim_steps
-        B = conds.shape[0]
-        T_len = conds.shape[1]
-        return self.diffusion.sample(
-            self.denoiser, conds, [B, T_len, 16], steps=steps)
-
-    def training_step(self, batch, batch_idx):
-        target, conds = batch
-        B = target.shape[0]
-        device = target.device
-
-        # Forward diffusion
-        t = torch.randint(0, self.cfg['diffusion']['T'], (B,), device=device)
-        xt, noise = self.diffusion.q_sample(target, t)
-
-        # Predict noise
-        pred_noise = self.denoiser(xt, t, conds)
-
-        loss = F.mse_loss(pred_noise, noise)
-
-        if HAS_LIGHTNING:
-            self.log('train_loss', loss, prog_bar=True, on_step=True)
-
-        return loss
-
-    def configure_optimizers(self):
-        opt = torch.optim.AdamW(self.parameters(), lr=self.lr)
-        return opt
-
-    @torch.no_grad()
-    def generate_sample(self, conds, data_factory):
-        """Generate a sample play for visualization."""
-        device = next(self.parameters()).device
-        conds = conds.to(device)
-
-        generated = self(conds)                            # [B, T, 16]
-        gen_np = generated.cpu().numpy()
-
-        defence_gen = gen_np[0, :, :10]                    # defence
-        offence_np = conds[0, :, :12].cpu().numpy()        # offence from conditioning
-
-        sample = np.concatenate([offence_np, defence_gen], axis=-1)  # [T, 22]
-        sample = sample[None, :, :]                                  # [1, T, 22]
-
-        samples = data_factory.recover_BALL_and_A(sample)
-        samples = data_factory.recover_B(samples)
-        return samples
-
-
-# ---------------------------------------------------------------------------
-#   Training entry (plain PyTorch — no Lightning dependency required)
+#   Training entry
 # ---------------------------------------------------------------------------
 
 def train(config, data_path, output_path):
-    """Main training loop in plain PyTorch (PyTorch Lightning optional)."""
+    """Main training loop with EMA, AMP, and DDIM visualization."""
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Device: {device}')
 
@@ -167,7 +69,6 @@ def train(config, data_path, output_path):
     df = DataFactory(real_data=real_data, seq_data=seq_data,
                      features_=features_, real_feat=real_feat)
 
-    # Split into train/valid
     train_dataset = BasketballDataset(
         df.train_data, df.seq_train, df.f_train, df.rf_train)
     train_loader = DataLoader(
@@ -186,6 +87,10 @@ def train(config, data_path, output_path):
 
     optimizer = torch.optim.AdamW(denoiser.parameters(), lr=t['lr_'])
 
+    # EMA for sampling quality (stochastic weight averaging)
+    ema = torch.optim.swa_utils.AveragedModel(
+        denoiser, avg_fn=lambda avg, model, _: avg * 0.9999 + model * 0.0001)
+
     # Mixed precision
     scaler = torch.amp.GradScaler('cuda') if device.type == 'cuda' else None
     use_amp = scaler is not None
@@ -202,20 +107,18 @@ def train(config, data_path, output_path):
     print(f'Batches/epoch: {num_batches}  Samples: {len(train_dataset)}')
     print(f'Diffusion T={d["T"]}  DDIM steps={d["ddim_steps"]}')
     if use_amp:
-        print('AMP: enabled (bfloat16/float16)')
+        print('AMP: enabled (float16)')
 
     while t['max_epochs'] is None or epoch < t['max_epochs']:
-        df.shuffle_train()
         epoch_loss = 0.0
 
-        for batch_idx, (target, conds) in enumerate(train_loader):
+        for target, conds in train_loader:
             target = target.to(device)
             conds = conds.to(device)
             B = target.shape[0]
 
             optimizer.zero_grad()
 
-            # Forward diffusion + noise prediction
             timesteps = torch.randint(0, d['T'], (B,), device=device)
 
             if use_amp:
@@ -233,6 +136,9 @@ def train(config, data_path, output_path):
                 loss.backward()
                 optimizer.step()
 
+            # Update EMA weights after optimizer step
+            ema.update_parameters(denoiser)
+
             epoch_loss += loss.item()
 
         epoch += 1
@@ -245,20 +151,21 @@ def train(config, data_path, output_path):
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': denoiser.state_dict(),
+                'ema_state_dict': ema.module.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'loss': avg_loss,
             }, ckpt_path)
             print(f'  Saved: {ckpt_path}')
 
-        # Visualization
+        # Visualization (use EMA weights for best quality)
         if epoch % t['vis_freq'] == 0:
             denoiser.eval()
+            ema_denoiser = ema.module  # EMA-averaged weights
             with torch.no_grad():
-                # Use fixed conditioning for consistent comparison
-                target, conds = next(iter(train_loader))
-                conds = conds[:1].to(device)  # single sample
+                _, conds = next(iter(train_loader))
+                conds = conds[:1].to(device)
                 generated = diffusion.sample(
-                    denoiser, conds, [1, t['seq_length'], 16],
+                    ema_denoiser, conds, [1, t['seq_length'], 16],
                     steps=d['ddim_steps'])
                 gen_np = generated[0].cpu().numpy()
                 off_np = conds[0, :, :12].cpu().numpy()
@@ -280,12 +187,9 @@ def train(config, data_path, output_path):
 # ---------------------------------------------------------------------------
 
 def parse_config():
-    """Minimal config parser — can also use Hydra or YAML."""
     parser = argparse.ArgumentParser(description='BasketballGAN PyTorch Training')
-    parser.add_argument('--config', type=str, default=None,
-                        help='YAML config file (optional, uses defaults if omitted)')
     parser.add_argument('--data_path', type=str, default='data')
-    parser.add_argument('--output', type=str, default='output_torch')
+    parser.add_argument('--output', type=str, default='output')
     parser.add_argument('--max_epochs', type=int, default=None)
     parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--lr', type=float, default=1e-4)
@@ -298,8 +202,7 @@ def parse_config():
     parser.add_argument('--vis_freq', type=int, default=10)
     args = parser.parse_args()
 
-    # Build config dict (supports YAML override if provided)
-    config = {
+    return {
         'model': {
             'n_filters': args.n_filters,
             'n_resblock': args.n_resblock,
@@ -319,24 +222,7 @@ def parse_config():
             'checkpoint_step': args.checkpoint_step,
             'vis_freq': args.vis_freq,
         },
-    }
-
-    # If YAML config provided, merge (shallow — can enhance with OmegaConf)
-    if args.config:
-        try:
-            import yaml
-            with open(args.config) as f:
-                yaml_cfg = yaml.safe_load(f)
-            # Deep merge (simple version)
-            for section in yaml_cfg:
-                if section in config:
-                    config[section].update(yaml_cfg[section])
-                else:
-                    config[section] = yaml_cfg[section]
-        except ImportError:
-            print('PyYAML not installed — ignoring --config')
-
-    return config, args.data_path, args.output
+    }, args.data_path, args.output
 
 
 if __name__ == '__main__':

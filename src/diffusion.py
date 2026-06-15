@@ -28,30 +28,22 @@ def sinusoidal_embedding(t, dim, max_period=10000):
 #   Diffusion process
 # ---------------------------------------------------------------------------
 
-class GaussianDiffusion:
-    """DDPM forward + DDIM reverse sampling."""
+class GaussianDiffusion(nn.Module):
+    """DDPM forward + DDIM reverse sampling.
+
+    Inherits nn.Module so buffers move automatically with model.to(device).
+    """
 
     def __init__(self, T=1000, beta_start=1e-4, beta_end=0.02):
+        super().__init__()
         self.T = T
         betas = torch.linspace(beta_start, beta_end, T)
         alphas = 1.0 - betas
         alpha_bars = torch.cumprod(alphas, dim=0)
 
-        self.register('betas', betas)
-        self.register('alphas', alphas)
-        self.register('alpha_bars', alpha_bars)
-
-    def register(self, name, tensor):
-        """Store as buffer-like attribute (moved to device with model)."""
-        # We use Parameter for device tracking, but don't optimize them
-        param = nn.Parameter(tensor, requires_grad=False)
-        setattr(self, name, param)
-
-    def to(self, device):
-        self.betas = self.betas.to(device)
-        self.alphas = self.alphas.to(device)
-        self.alpha_bars = self.alpha_bars.to(device)
-        return self
+        self.register_buffer('betas', betas)
+        self.register_buffer('alphas', alphas)
+        self.register_buffer('alpha_bars', alpha_bars)
 
     def q_sample(self, x0, t, noise=None):
         """Forward: x0 → xt. Returns (xt, noise)."""
@@ -128,7 +120,6 @@ class DenoiserNet(nn.Module):
         ])
 
         # Attention (interleaved every 2 resblocks)
-        attn_dim = n_filters // num_heads
         self.attn_blocks = nn.ModuleList([
             SelfAttentionBlock(n_filters, num_heads=num_heads)
             for _ in range(n_resblock // 2)
@@ -139,8 +130,6 @@ class DenoiserNet(nn.Module):
         self.output_proj = nn.Conv1d(n_filters, in_dim, 1)
 
     def forward(self, xt, t, conds, mask=None):
-        B, T_len, _ = xt.shape
-
         # Time embedding
         t_emb = sinusoidal_embedding(t, self.n_filters)
         t_emb = self.time_mlp(t_emb)                          # [B, n_filters]
