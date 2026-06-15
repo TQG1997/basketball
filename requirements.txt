@@ -1,4 +1,5 @@
-# TensorFlow 2.x (TF1 compat mode)
+# TensorFlow 2.x (TF1 compat mode — requires <2.16)
+# Colab has TF 2.15 pre-installed; skip this line if using Colab.
 tensorflow>=2.0,<2.16
 
 # Core numerical
