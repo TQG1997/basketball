@@ -8,7 +8,7 @@ scipy>=1.10
 
 # Visualization & UI
 matplotlib>=3.7
-PyQt5>=5.15
+gradio>=4.0      # Web UI
 seaborn>=0.12
 
 # Data processing
