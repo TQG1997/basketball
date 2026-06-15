@@ -66,32 +66,42 @@ def auto_configure():
 
     vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
 
-    # Scale model capacity with VRAM
+    # Scale model capacity with VRAM (filters must be divisible by num_heads=4)
     if vram_gb >= 24:
-        filters, resblocks = 1536, 14
+        filters, resblocks = 2048, 14
     elif vram_gb >= 15:
-        filters, resblocks = 1024, 10
+        filters, resblocks = 1536, 10
     elif vram_gb >= 8:
-        filters, resblocks = 512, 6
+        filters, resblocks = 768, 6
     else:
-        filters, resblocks = 256, 4
+        filters, resblocks = 384, 4
 
-    # Memory model: weights (~filters² × resblocks × 3 bytes × 3 for opt)
-    #               + activations (batch × T × filters × 4 bytes × dilate)
-    num_params = filters * filters * (resblocks * 2 + 4) * 3  # rough conv param count
-    weight_mem_gb = num_params * 4 / (1024**3) * 3             # FP32 + opt state
+    # ---- Memory model (all in FP32, empirical correction for AMP) ----
     T = 50
+    num_layers = resblocks * 2 + 4       # conv layers in resblocks + projections
 
-    # Activations scale linearly with batch, filters, T, num_layers
-    # Empirical: each sample ~ filters × T × 8 bytes × 2 (fwd+bwd) × (1+attention_factor)
-    attention_factor = 1 + (T * T) / (filters * 10) if T > 0 else 1
-    mem_per_sample_gb = filters * T * 8 * (resblocks + 3) * attention_factor / (1024**3)
+    # Model weights + optimizer states (AdamW: 2× params + 1× weights ≈ 3×)
+    num_params = filters * filters * num_layers * 3
+    weight_mem_gb = num_params * 4 * 3 / (1024**3)             # FP32 bytes × (weights+opt)
 
+    # Activation memory per batch item per layer:
+    #   FP32: T × filters × 4 bytes × 2 (fwd activation + bwd gradient)
+    # Each sample produces activations across ALL layers
+    activation_per_sample_gb = T * filters * 4 * 2 * num_layers / (1024**3)
+
+    # Attention O(T²) intermediates per head
+    num_attn_layers = resblocks // 2 + 1   # self-attn every 2 blocks + cross-attn
+    attn_per_sample_gb = 4 * T * T * 4 * num_attn_layers / (1024**3)  # heads × T² × fp32
+
+    # Total per sample (fwd + bwd)
+    per_sample_gb = activation_per_sample_gb + attn_per_sample_gb
+
+    # Solve: budget = weight_mem + batch × per_sample
     budget_gb = vram_gb * 0.8 - weight_mem_gb
-    batch = int(budget_gb / max(mem_per_sample_gb, 1e-6))
+    batch = int(budget_gb / max(per_sample_gb, 1e-6))
     batch = max(16, min(batch, 512))
 
-    total_est = weight_mem_gb + batch * mem_per_sample_gb
+    total_est = weight_mem_gb + batch * per_sample_gb
     print(f'Auto-config: {vram_gb:.1f}GB VRAM → batch={batch}, '
           f'filters={filters}, resblocks={resblocks}  (est {total_est:.1f}GB)')
     return {'batch_size': batch, 'n_filters': filters, 'n_resblock': resblocks}
