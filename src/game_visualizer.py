@@ -10,7 +10,9 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.patches import Circle, Rectangle, Arc
 
-from utils import DataFactory
+
+# Note: plot_data() works on raw numpy arrays — no DataFactory needed.
+# DataFactory is only used by training callers (train.py) for normalization.
 
 
 def update_all(frame_id, player_circles, ball_circle, annotations, data):
@@ -126,17 +128,16 @@ if __name__ == '__main__':
     parser.add_argument('--seq_length', type=int, default=100)
     parser.add_argument('--save_path', type=str, default='./samples/')
     parser.add_argument('--data_path', type=str, required=True,
-                        help='path to .npy data file')
+                        help='path to .npy data file (shape [N, T, D] where D >= 22)')
     opt = parser.parse_args()
 
     os.makedirs(opt.save_path, exist_ok=True)
 
-    train_data = np.load(opt.data_path)
-    data_factory = DataFactory(train_data)
-    recovered = data_factory.fetch_ori_data()
-    recovered = data_factory.recover_data(recovered)
+    data = np.load(opt.data_path)
+    if data.ndim == 2:
+        data = data[None, :, :]  # [T, D] → [1, T, D]
 
-    for i in range(min(opt.amount, len(recovered))):
-        plot_data(recovered[i:i + 1], length=opt.seq_length,
+    for i in range(min(opt.amount, len(data))):
+        plot_data(data[i:i + 1], length=opt.seq_length,
                   file_path=os.path.join(opt.save_path, f'play_{i}.mp4'),
                   if_save=opt.save)
