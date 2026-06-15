@@ -1,18 +1,20 @@
-"""WGAN model loading and inference.
+"""WGAN model loading and inference (TF 2.16+ / Keras 3).
 
 Usage:
     # Called programmatically from Main.py:
-    graph, saver, config, data_factory = Load_Model()
-    run_Model(graph, saver, config, data_factory)
+    model, data_factory = Load_Model()
+    output = run_Model(model, data_factory)
 """
 
 import os
-import sys
 import argparse
 import numpy as np
-import tensorflow.compat.v1 as tf
-tf.disable_v2_behavior()
 
+# TF must be imported before ThreeDiscrim to avoid compat issues
+import tensorflow as tf  # noqa: E402
+
+from src.ThreeDiscrim import VAEGAN_Model
+from src.Train_Triple import TrainingConfig, z_samples
 from utils import DataFactory
 import draw_feat
 
@@ -23,121 +25,101 @@ MODEL_PATH_DEFAULT = os.path.join(DATA_PATH, 'checkpoints', 'model.ckpt-88200')
 SAVE_PATH = os.path.join(DATA_PATH, 'output')
 
 # ---- Inference constants ----
-BATCH_SIZE = 8
 N_LATENT = 100
 LATENT_DIM = 150
 SEQ_LEN = 50
 
 
 def _ensure_dirs():
-    """Create required directories if they don't exist."""
-    for path in [SAVE_PATH, os.path.dirname(MODEL_PATH_DEFAULT)]:
-        if not os.path.exists(path):
-            os.makedirs(path, exist_ok=True)
-
-
-def z_samples(n_latent=N_LATENT, latent_dim=LATENT_DIM):
-    return np.random.normal(0., 1., size=[n_latent, latent_dim])
+    for path in [SAVE_PATH]:
+        os.makedirs(path, exist_ok=True)
 
 
 def _check_file(filepath, description):
-    """Raise a user-friendly error if a required file is missing."""
     if not os.path.exists(filepath):
         raise FileNotFoundError(
-            f"{description} not found: {filepath}\n"
-            f"Please download the required files. See README.md for download links."
-        )
+            f'{description} not found: {filepath}\n'
+            f'See README.md for download links.')
 
 
 def parse_args():
-    """Parse command-line arguments for standalone inference."""
-    parser = argparse.ArgumentParser(
-        description='BasketballGAN: Run inference from a sketch')
+    parser = argparse.ArgumentParser(description='BasketballGAN: Inference from sketch')
     parser.add_argument('--checkpoint', type=str, default=MODEL_PATH_DEFAULT,
-                        help='Path to model checkpoint (without .meta extension)')
-    parser.add_argument('--data_dir', type=str, default=os.path.join(DATA_PATH, 'Model_data'),
-                        help='Directory containing 50Real.npy, 50Seq.npy, SeqCond.npy, RealCond.npy')
+                        help='Path to checkpoint prefix (e.g. model.ckpt-88200)')
     parser.add_argument('--points', type=str, default='Points/points2.npy',
-                        help='Path to input sketch .npy file')
+                        help='Path to input sketch .npy')
     parser.add_argument('--output', type=str, default=os.path.join(SAVE_PATH, 'output.npy'),
-                        help='Path for generated output .npy file')
+                        help='Output .npy path')
     return parser.parse_args()
 
 
-def Load_Model(model_path=None):
-    """Load the pre-trained model and return (graph, saver, config, data_factory).
+def Load_Model(checkpoint_path=None):
+    """Load the pre-trained model.
 
-    Parameters
-    ----------
-    model_path : str or None
-        Path to checkpoint (without .meta extension).
-        Defaults to MODEL_PATH_DEFAULT.
-
-    Returns
-    -------
-    graph : tf.Graph
-    saver : tf.train.Saver
-    config : tf.ConfigProto
-    data_factory : DataFactory
-
-    Raises
-    ------
-    FileNotFoundError
-        If checkpoint or data files are missing, with download instructions.
+    Returns (model, data_factory) where model is a VAEGAN_Model instance.
     """
-    if model_path is None:
-        model_path = MODEL_PATH_DEFAULT
+    if checkpoint_path is None:
+        checkpoint_path = MODEL_PATH_DEFAULT
 
-    meta_path = model_path + '.meta'
     data_dir = os.path.join(DATA_PATH, 'Model_data')
 
-    # Check required files before starting TF
-    _check_file(meta_path, "Model checkpoint (.meta file)")
-    _check_file(os.path.join(data_dir, '50Seq.npy'), "Sequence data (50Seq.npy)")
-    _check_file(os.path.join(data_dir, 'SeqCond.npy'), "Sequence features (SeqCond.npy)")
-    _check_file(os.path.join(data_dir, '50Real.npy'), "Real data (50Real.npy)")
-    _check_file(os.path.join(data_dir, 'RealCond.npy'), "Real features (RealCond.npy)")
+    # Check required files
+    _check_file(os.path.join(data_dir, '50Seq.npy'), 'Sequence data')
+    _check_file(os.path.join(data_dir, 'SeqCond.npy'), 'Sequence features')
+    _check_file(os.path.join(data_dir, '50Real.npy'), 'Real data')
+    _check_file(os.path.join(data_dir, 'RealCond.npy'), 'Real features')
 
-    with tf.get_default_graph().as_default() as graph:
-        config = tf.ConfigProto()
-        config.gpu_options.allow_growth = True
+    # Initialize DataFactory
+    image_data = np.load(os.path.join(data_dir, '50Seq.npy'))
+    features_ = np.load(os.path.join(data_dir, 'SeqCond.npy'))
+    real_data = np.load(os.path.join(data_dir, '50Real.npy'))[:, :50, :, :]
+    real_feat = np.load(os.path.join(data_dir, 'RealCond.npy'))
+    print('real_data.shape', real_data.shape)
+    data_factory = DataFactory(real_data, image_data, features_, real_feat)
 
-        try:
-            saver = tf.train.import_meta_graph(meta_path)
-        except Exception as e:
-            raise RuntimeError(
-                f"Failed to load model checkpoint: {meta_path}\n"
-                f"Make sure the .meta, .index, and .data-* files are all present.\n"
-                f"Original error: {e}"
-            )
+    # Build model with dummy config
+    class DummyConfig:
+        pass
+    config = DummyConfig()
+    config.batch_size = 8
+    config.seq_length = SEQ_LEN
+    config.latent_dims = LATENT_DIM
+    config.n_filters = 256
+    config.n_resblock = 8
+    config.lr_ = 1e-4
+    config.beta = 0.001
+    config.recon_weight = 1.0
+    config.features_ = 12
+    config.features_d = 10
+    config.folder_path = DATA_PATH
 
-        print("Model found at:", model_path)
+    model = VAEGAN_Model(config)
 
-        image_data = np.load(os.path.join(data_dir, '50Seq.npy'))
-        features_ = np.load(os.path.join(data_dir, 'SeqCond.npy'))
-        real_data = np.load(os.path.join(data_dir, '50Real.npy'))[:, :50, :, :]
-        real_feat = np.load(os.path.join(data_dir, 'RealCond.npy'))
-        print('real_data.shape', real_data.shape)
+    # Load checkpoint if it exists
+    if os.path.exists(checkpoint_path + '.index'):
+        model.load_model(checkpoint_path)
+        print(f'Model loaded from {checkpoint_path}')
+    else:
+        # Check for new-format checkpoint
+        alt_path = checkpoint_path.replace('.ckpt-', '.ckpt')
+        if os.path.exists(os.path.dirname(checkpoint_path)):
+            ckpt_files = [f for f in os.listdir(os.path.dirname(checkpoint_path))
+                          if f.startswith('model.ckpt') and f.endswith('.index')]
+            if ckpt_files:
+                alt_path = os.path.join(os.path.dirname(checkpoint_path),
+                                        ckpt_files[0].replace('.index', ''))
+                model.load_model(alt_path)
+                print(f'Model loaded from {alt_path}')
+            else:
+                print('WARNING: No checkpoint found — using random weights')
+        else:
+            print('WARNING: No checkpoint found — using random weights')
 
-        data_factory = DataFactory(real_data, image_data, features_, real_feat)
-
-    return graph, saver, config, data_factory
+    return model, data_factory
 
 
-def run_Model(graph, saver, config, data_factory, points_path=None, output_path=None):
-    """Run inference: generate defensive plays from a sketched offensive play.
-
-    Parameters
-    ----------
-    graph : tf.Graph
-    saver : tf.train.Saver
-    config : tf.ConfigProto
-    data_factory : DataFactory
-    points_path : str or None
-        Path to sketch .npy file.
-    output_path : str or None
-        Where to save the generated output.
-    """
+def run_Model(model, data_factory, points_path=None, output_path=None):
+    """Generate defensive plays from a sketched offensive play."""
     if points_path is None:
         points_path = 'Points/points2.npy'
     if output_path is None:
@@ -148,108 +130,52 @@ def run_Model(graph, saver, config, data_factory, points_path=None, output_path=
     points = np.load(points_path)
     front = np.tile(points[0], (2, 1))
     points = np.concatenate([front, points])
-    print("Points:", points.shape)
-    print(points[-1])
+    print('Points:', points.shape)
     extra = np.tile(points[-1], (4, 1))
     points = np.concatenate([points, extra])
 
     feature = draw_feat.get_feature(points)
 
-    with tf.Session(config=config) as sess:
-        saver.restore(sess, MODEL_PATH_DEFAULT)
+    target_length = len(points)
+    dims = 10
+    points_batch = np.reshape(np.tile(points, (dims, 1)), [dims, target_length, 12])
+    feature_batch = np.repeat(feature, dims, axis=0)
 
-        result_t = graph.get_tensor_by_name('G_/concat_1:0')
-        use_encoder_t = graph.get_tensor_by_name('use_encoder:0')
-        latent_input_t = graph.get_tensor_by_name('Latent:0')
-        feature_input = graph.get_tensor_by_name('Seq_feat:0')
-        condition_input_t = graph.get_tensor_by_name('Cond_input:0')
+    # Normalize
+    team_AB = np.concatenate([
+        points_batch[:, :, :2].reshape([dims, target_length, 2]),
+        points_batch[:, :, 2:12].reshape([dims, target_length, 10]),
+        feature_batch.reshape([dims, target_length, 6]),
+    ], axis=-1)
+    team_AB = data_factory.normalize(team_AB)
+    team_A = team_AB[:, :, :12]
+    team_Feat = team_AB[:, :, 12:]
 
-        print("Loaded")
+    results = []
+    for idx in range(dims):
+        real_conds = np.repeat(team_A[idx:idx + 1, :], N_LATENT, axis=0)
+        real_feat = np.repeat(team_Feat[idx:idx + 1, :], N_LATENT, axis=0)
 
-        target_length = len(points)
-        dims = 10
-        points = [points] * dims
-        points = np.reshape(points, newshape=[dims, target_length, 12])
+        z = z_samples(N_LATENT, LATENT_DIM)
+        result = model.reconstruct(
+            tf.constant(real_conds, dtype=tf.float32),
+            tf.constant(real_feat, dtype=tf.float32),
+            tf.constant(z, dtype=tf.float32))
+        result_np = result.numpy()
 
-        feature = np.repeat(feature, dims, axis=0)
+        recovered = data_factory.recover_data(result_np[:, :, :22])
+        recovered = np.concatenate([recovered, result_np[:, :, 22:]], axis=-1)
+        results.append(recovered)
 
-        print(points.shape)
+    results = np.stack(results, axis=1)
+    print('Output shape:', results.shape)
 
-        # Target data
-        target_data = points
-        target_feat = feature
-
-        print('target_data.shape', target_data.shape)
-
-        team_AB = np.concatenate(
-            [
-                # ball xy
-                target_data[:, :, :2].reshape(
-                    [target_data.shape[0], target_data.shape[1], 1 * 2]),
-                # team A players xy
-                target_data[:, :, 2:12].reshape(
-                    [target_data.shape[0], target_data.shape[1], 5 * 2]),
-                # feature
-                target_feat[:, :, :].reshape(
-                    [target_feat.shape[0], target_feat.shape[1], 6 * 1])
-            ],
-            axis=-1)
-        team_AB = data_factory.normalize(team_AB)
-        team_A = team_AB[:, :, :12]
-        team_Feat = team_AB[:, :, 12:]
-
-        # Result collector
-        results_A_fake_B = []
-        results_A_real_B = []
-
-        print(team_AB.shape)
-        print(team_AB.shape[0])
-
-        for idx in range(team_AB.shape[0]):
-            # Generate N_LATENT results for the same condition
-            real_conds = team_A[idx:idx + 1, :target_length]
-            real_conds = np.concatenate(
-                [real_conds for _ in range(N_LATENT)], axis=0)
-
-            real_feat = team_Feat[idx:idx + 1, :target_length]
-            real_feat = np.concatenate(
-                [real_feat for _ in range(N_LATENT)], axis=0)
-
-            latents = z_samples()
-            feed_dict = {
-                use_encoder_t: False,
-                latent_input_t: latents,
-                condition_input_t: real_conds,
-                feature_input: real_feat
-            }
-
-            result = sess.run(result_t, feed_dict=feed_dict)
-
-            recovered_A_fake_B = data_factory.recover_data(result[:, :, :22])
-            recovered_A_fake_B = np.concatenate(
-                [recovered_A_fake_B, result[:, :, 22:]], axis=-1)
-
-            temp_A_fake_B_concat = recovered_A_fake_B
-            results_A_fake_B.append(temp_A_fake_B_concat)
-
-        # Concat along conditions dimension (axis=1)
-        results_A_fake_B = np.stack(results_A_fake_B, axis=1)
-
-        # Save as numpy
-        print(np.array(results_A_fake_B).shape)
-        print(np.array(results_A_real_B).shape)
-
-        np.save(output_path,
-                np.array(results_A_fake_B).astype(np.float32).reshape(
-                    [N_LATENT, team_AB.shape[0], team_AB.shape[1], 28]))
-
-        print('!!Completely Saved!! →', output_path)
+    np.save(output_path, results.astype(np.float32).reshape(
+        [N_LATENT, dims, target_length, 28]))
+    print(f'!!Saved!! → {output_path}')
 
 
-# ---- Standalone execution ----
 if __name__ == '__main__':
     args = parse_args()
-    graph, saver, config, data_factory = Load_Model(model_path=args.checkpoint)
-    run_Model(graph, saver, config, data_factory,
-              points_path=args.points,
-              output_path=args.output)
+    model, data_factory = Load_Model(checkpoint_path=args.checkpoint)
+    run_Model(model, data_factory, points_path=args.points, output_path=args.output)

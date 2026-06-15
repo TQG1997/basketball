@@ -1,5 +1,5 @@
-# TensorFlow (must be <2.16 — TF 2.16+ removes compat.v1: tf.layers, tf.placeholder, tf.Session)
-tensorflow>=2.13,<2.16
+# TensorFlow 2.16+ (Keras 3)
+tensorflow>=2.16
 
 # Core numerical
 numpy>=1.24
