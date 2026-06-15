@@ -1,44 +1,27 @@
 # BasketballGAN — PyTorch diffusion model configuration
 # Override via CLI: python src/train.py --max_epochs 500 --batch_size 32
 
-defaults:
-  - _self_
-
 model:
-  latent_dims: 64       # reduced from 150 — smaller bottleneck with stronger KL constraint
   n_filters: 256
-  n_resblock: 8
-  num_heads: 4          # attention heads
-  features_: 12         # offence features (ball xy + 5 players xy)
-  features_d: 10        # defence features (5 players xy)
+  n_resblock: 4
+  num_heads: 4
 
 training:
-  batch_size: 64        # reduced from 128 — attention adds ~30% memory
+  batch_size: 64
   seq_length: 50
   lr_: 1.0e-4
-  beta: 0.001           # KL divergence weight (target value after annealing)
-  recon_weight: 1.0     # L1 reconstruction weight
-  pretrain_D: 25        # epochs to pretrain discriminator
-  train_D: 5            # D updates per G update
   max_epochs: null      # null = run forever
   checkpoint_step: 100
-  vis_freq: 5
+  vis_freq: 10
+  valid_freq: 5         # validate every N epochs (0 = skip)
 
-  # KL annealing: linearly warm β from 0 to target over these epochs
-  kl_anneal_epochs: 50  # 0 = no annealing (fixed beta)
-
-paths:
-  folder_path: output
-  data_path: data
-
-# Diffusion model parameters
 diffusion:
-  T: 1000                # total diffusion timesteps
-  beta_start: 0.0001     # linear noise schedule start
-  beta_end: 0.02         # linear noise schedule end
-  ddim_steps: 50         # DDIM sampling steps (fewer = faster, more = better)
+  T: 1000               # total diffusion timesteps
+  beta_start: 0.0001    # linear noise schedule start
+  beta_end: 0.02        # linear noise schedule end
+  ddim_steps: 50        # DDIM sampling steps
 
 wandb:
   enabled: false
   project: basketballgan
-  entity: null        # your wandb username/team
+  entity: null

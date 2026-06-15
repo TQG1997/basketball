@@ -75,6 +75,12 @@ def train(config, data_path, output_path):
         train_dataset, batch_size=t['batch_size'], shuffle=True,
         num_workers=2, pin_memory=True, drop_last=True)
 
+    valid_dataset = BasketballDataset(
+        df.valid_data, df.seq_valid, df.f_valid, df.rf_valid)
+    valid_loader = DataLoader(
+        valid_dataset, batch_size=t['batch_size'], shuffle=False,
+        num_workers=1, pin_memory=True, drop_last=False)
+
     # --- Build model ---
     diffusion = GaussianDiffusion(
         T=d['T'], beta_start=d['beta_start'], beta_end=d['beta_end']).to(device)
@@ -102,9 +108,11 @@ def train(config, data_path, output_path):
     os.makedirs(sample_dir, exist_ok=True)
 
     num_batches = len(train_loader)
+    valid_freq = t.get('valid_freq', 5)
     epoch = 0
 
-    print(f'Batches/epoch: {num_batches}  Samples: {len(train_dataset)}')
+    print(f'Train batches/epoch: {num_batches}  Val batches: {len(valid_loader)}')
+    print(f'Samples: {len(train_dataset)} train, {len(valid_dataset)} valid')
     print(f'Diffusion T={d["T"]}  DDIM steps={d["ddim_steps"]}')
     if use_amp:
         print('AMP: enabled (float16)')
@@ -143,7 +151,25 @@ def train(config, data_path, output_path):
 
         epoch += 1
         avg_loss = epoch_loss / num_batches
-        print(f'Epoch {epoch:4d}  loss={avg_loss:.6f}')
+
+        # Validation
+        val_loss_str = ''
+        if valid_freq > 0 and epoch % valid_freq == 0:
+            denoiser.eval()
+            val_loss = 0.0
+            with torch.no_grad():
+                for v_target, v_conds in valid_loader:
+                    v_target = v_target.to(device)
+                    v_conds = v_conds.to(device)
+                    v_t = torch.randint(0, d['T'], (v_target.shape[0],), device=device)
+                    v_xt, v_noise = diffusion.q_sample(v_target, v_t)
+                    v_pred = denoiser(v_xt, v_t, v_conds)
+                    val_loss += F.mse_loss(v_pred, v_noise).item()
+            val_loss /= max(1, len(valid_loader))
+            val_loss_str = f'  val_loss={val_loss:.6f}'
+            denoiser.train()
+
+        print(f'Epoch {epoch:4d}  loss={avg_loss:.6f}{val_loss_str}')
 
         # Checkpoint
         if epoch % t['checkpoint_step'] == 0:

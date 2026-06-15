@@ -7,7 +7,6 @@ Conditioning: offence(12) + seq_feat(6) = 18 dims
 import math
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from ops import ResBlock1D, SelfAttentionBlock, CrossAttentionBlock
 
 

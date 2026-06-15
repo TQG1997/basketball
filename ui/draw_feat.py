@@ -6,8 +6,7 @@ def distance(x1,y1,x2,y2):
     return dist
 
 def get_feature(real_):
-    BASKET_RIGHT = np.array([90.5, 24.8] * 100)
-    BASKET_RIGHT = np.reshape(BASKET_RIGHT, newshape=[100, 2])
+    BASKET_RIGHT = np.tile([90.5, 24.8], (100, 1))
 
     en_ball = []
     b_feat = []

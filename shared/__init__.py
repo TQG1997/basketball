@@ -27,8 +27,6 @@ class DataFactory(object):
                 real_feat=None):
         if not DataFactory.__instance:
             DataFactory.__instance = object.__new__(cls)
-        else:
-            print("Instance Exists! :D")
         return DataFactory.__instance
 
     def __init__(self,
@@ -37,6 +35,8 @@ class DataFactory(object):
                  features_=None,
                  real_feat=None):
         """Initialize with dataset arrays.
+
+        Only processes data on first construction — subsequent calls are no-ops.
 
         Parameters
         ----------
@@ -50,7 +50,7 @@ class DataFactory(object):
         real_feat : np.ndarray, shape [N, length, 6]
             Same format as features_ for ground-truth plays.
         """
-        if real_data is not None:
+        if real_data is not None and not hasattr(self, '_initialized'):
             self.__real_data = real_data
             self.__seq_data = seq_data
             self.features_ = features_
@@ -62,6 +62,8 @@ class DataFactory(object):
             # Normalize positions in-place on __real_data
             self.__norm_dict = self.__normalize_pos()
 
+            self._initialized = True
+
             # Prepare train/valid splits
             (self.train_data, self.valid_data,
              self.seq_train, self.seq_valid,
@@ -69,36 +71,7 @@ class DataFactory(object):
              self.rf_train, self.rf_valid) = self.__get_ready()
 
     # ---------------------------------------------------------------
-    #   Data accessors
-    # ---------------------------------------------------------------
-
-    def fetch_data(self):
-        return self.train_data, self.valid_data
-
-    def fetch_seq(self):
-        return self.seq_train, self.seq_valid
-
-    def fetch_feat(self):
-        return self.f_train, self.f_valid
-
-    def fetch_realF(self):
-        return self.rf_train, self.rf_valid
-
-    def fetch_ori_data(self):
-        """Return original data as [N, seq_len, 23] (ball xyz + 10 players xy)."""
-        return np.concatenate(
-            [
-                # ball xyz
-                self.__real_data[:, :, 0, :3].reshape(
-                    [self.__real_data.shape[0], self.__real_data.shape[1], 1 * 3]),
-                # team A + team B players xy
-                self.__real_data[:, :, 1:, :2].reshape(
-                    [self.__real_data.shape[0], self.__real_data.shape[1], 10 * 2])
-            ],
-            axis=-1)
-
-    # ---------------------------------------------------------------
-    #   Denormalization helpers
+    #   Denormalization helpers (in-place — same API as original)
     # ---------------------------------------------------------------
 
     def recover_data(self, norm_data):
@@ -108,26 +81,6 @@ class DataFactory(object):
             * self.__norm_dict['x']['stddev'] + self.__norm_dict['x']['mean'])
         norm_data[:, :, [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21]] = (
             norm_data[:, :, [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21]]
-            * self.__norm_dict['y']['stddev'] + self.__norm_dict['y']['mean'])
-        return norm_data
-
-    def recover_play(self, norm_data):
-        """Denormalize x/y for a [n_players, 22] tensor."""
-        norm_data[:, [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20]] = (
-            norm_data[:, [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20]]
-            * self.__norm_dict['x']['stddev'] + self.__norm_dict['x']['mean'])
-        norm_data[:, [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21]] = (
-            norm_data[:, [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21]]
-            * self.__norm_dict['y']['stddev'] + self.__norm_dict['y']['mean'])
-        return norm_data
-
-    def recover_seq(self, norm_data):
-        """Denormalize x/y for a [..., 12] tensor (ball xy + 5 offence xy)."""
-        norm_data[:, [0, 2, 4, 6, 8, 10]] = (
-            norm_data[:, [0, 2, 4, 6, 8, 10]]
-            * self.__norm_dict['x']['stddev'] + self.__norm_dict['x']['mean'])
-        norm_data[:, [1, 3, 5, 7, 9, 11]] = (
-            norm_data[:, [1, 3, 5, 7, 9, 11]]
             * self.__norm_dict['y']['stddev'] + self.__norm_dict['y']['mean'])
         return norm_data
 
@@ -152,38 +105,7 @@ class DataFactory(object):
         return norm_data
 
     # ---------------------------------------------------------------
-    #   Shuffling
-    # ---------------------------------------------------------------
-
-    def shuffle_train(self):
-        """Shuffle training data (called per epoch)."""
-        shuffled = np.random.permutation(self.train_data['A'].shape[0])
-        self.train_data['A'] = self.train_data['A'][shuffled]
-        self.train_data['B'] = self.train_data['B'][shuffled]
-        self.seq_train = self.seq_train[shuffled]
-        self.f_train = self.f_train[shuffled]
-        self.rf_train = self.rf_train[shuffled]
-
-    def shuffle_valid(self):
-        """Shuffle validation data."""
-        shuffled = np.random.permutation(self.valid_data['A'].shape[0])
-        self.valid_data['A'] = self.valid_data['A'][shuffled]
-        self.valid_data['B'] = self.valid_data['B'][shuffled]
-        self.seq_valid = self.seq_valid[shuffled]
-        self.f_valid = self.f_valid[shuffled]
-        self.rf_valid = self.rf_valid[shuffled]
-
-    def shuffle(self):
-        """Shuffle both training and validation data (convenience method)."""
-        self.shuffle_train()
-        self.shuffle_valid()
-        return (self.train_data, self.valid_data,
-                self.seq_train, self.seq_valid,
-                self.f_train, self.f_valid,
-                self.rf_train, self.rf_valid)
-
-    # ---------------------------------------------------------------
-    #   Normalization (for inference — normalize a single sketch)
+    #   Normalization (for UI inference — normalize a sketch)
     # ---------------------------------------------------------------
 
     def normalize(self, input_):
