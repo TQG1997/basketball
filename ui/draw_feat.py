@@ -8,7 +8,6 @@ def distance(x1,y1,x2,y2):
 def get_feature(real_):
     BASKET_RIGHT = np.tile([90.5, 24.8], (100, 1))
 
-    en_ball = []
     b_feat = []
     tmp_ball = -1
 

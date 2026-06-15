@@ -3,12 +3,11 @@ import numpy as np
 
 import os
 
-import time
 import matplotlib
-matplotlib.use('agg')  # run backend
+matplotlib.use('agg')  # non-interactive backend
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-from matplotlib.patches import Circle, Rectangle, Arc
+from matplotlib.patches import Circle
 
 
 # Note: plot_data() works on raw numpy arrays — no DataFactory needed.

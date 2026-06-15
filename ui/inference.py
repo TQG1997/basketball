@@ -29,7 +29,6 @@ SAVE_PATH = os.path.join(DATA_PATH, 'output')
 
 # ---- Inference constants ----
 N_LATENT = 100
-LATENT_DIM = 150
 SEQ_LEN = 50
 DDIM_STEPS = 50
 

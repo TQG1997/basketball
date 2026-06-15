@@ -1,26 +1,12 @@
-# ---- Deep Learning Framework ----
+# Deep Learning Framework
 torch>=2.1
-lightning>=2.1
 
 # Core numerical
 numpy>=1.24
-scipy>=1.10
 
 # Visualization & UI
 matplotlib>=3.7
-gradio>=4.0      # Web UI
-seaborn>=0.12
-
-# Data processing
-pandas>=2.0
-h5py>=3.8
-
-# UI trajectory simplification
-rdp>=0.8
+gradio>=4.0
 
 # Experiment management (optional)
 wandb>=0.16
-
-# Other
-packaging>=23
-protobuf>=3.20
