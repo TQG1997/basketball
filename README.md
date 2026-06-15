@@ -1,116 +1,77 @@
 # BasketballGAN
 
-### Generate the ghosting defensive strategies given offensive sketch.
+### Generate defensive basketball play simulations from offensive sketches.
 
-[Paper](https://arxiv.org/abs/1909.07088) | [CGVLab](https://people.cs.nctu.edu.tw/~yushuen/) | [Video](https://youtu.be/NTir0-znPyw)
-
-**BasketballGAN: Generating Basketball Play Simulation through Sketching**
-
-Hsin-Ying Hsieh<sup>1</sup>, Chieh-Yu Chen<sup>2</sup>, Yu-Shuen Wang<sup>1</sup>, Jung-Hong Chuang<sup>1</sup>
-
-<sup>1</sup>National Chiao Tung University, <sup>2</sup>NVIDIA Corporation
-
-Accepted paper in ACMMM 2019.
-
-## Project Structure
-
-```
-Basketball/
-├── src/               # GAN model source code
-│   ├── Train_Triple.py      # Training entry
-│   ├── ThreeDiscrim.py      # Discriminator model
-│   ├── game_visualizer.py   # Game visualization utilities
-│   ├── ops.py               # TensorFlow ops
-│   ├── utils.py             # Utility functions
-│   └── court.png            # Court background (high-res for training)
-├── ui/                # Interactive UI application (PyQt5)
-│   ├── Main.py              # Main application entry
-│   ├── Drawingboard.py      # Drawing board for sketching plays
-│   ├── Court.py             # Court rendering
-│   ├── Players.py           # Player rendering
-│   ├── Ball.py / Bezier.py  # Ball trajectory
-│   ├── WGAN.py              # WGAN model integration
-│   ├── draw_feat.py         # Feature drawing
-│   ├── SavePos.py           # Position saving/loading
-│   ├── CreateTraj.py        # Trajectory creation
-│   ├── utils.py             # UI utilities
-│   ├── images/              # UI assets (icons, court)
-│   ├── Points/              # Saved position data
-│   ├── Data/
-│   │   ├── checkpoints/     # Pre-trained model checkpoints
-│   │   └── output/          # Generated play output
-│   └── run_ui_container.sh  # Docker run script
-├── data/              # Dataset (.npy files)
-│   ├── 50Real.npy
-│   ├── 50Seq.npy
-│   ├── FEATURES-4.npy
-│   ├── RealCond.npy
-│   └── SeqCond.npy
-├── DataTranslater/    # Data conversion tools
-│   └── ToCsv.py
-└── requirements.txt   # Python dependencies
-```
+A VAE-GAN model that generates realistic defensive player movements conditioned on an offensive play sequence, using three WGAN-GP discriminators.
 
 ## Prerequisites
 
 - Linux / macOS
 - NVIDIA GPU (for training)
-- Docker (recommended for training)
-- Python 3.6+ (for UI)
+- Python 3.8+
 
-## Getting Started
-
-### Training
+## Quick Start
 
 ```bash
-cd src
-python Train_Triple.py --folder_path='tmp' --data_path='../data'
+# 1. Clone
+git clone https://github.com/TQG1997/basketball.git
+cd basketball
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Download dataset from Google Drive and place .npy files under data/
+#    https://drive.google.com/drive/folders/1uNPw7LOA3xENclQRtSlUftiR7tlVNOts
+
+# 4. Train
+python src/Train_Triple.py --folder_path='output' --data_path='data'
 ```
 
-### UI Application
+Checkpoints and sample animations are saved under the `--folder_path` directory.
+
+## Google Colab
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/TQG1997/basketball/blob/main/notebooks/train.ipynb)
+
+Use **Runtime → Change runtime type → T4 GPU**. The notebook handles cloning, dependency installation, dataset download, Drive mounting, and training in one go.
+
+> Set `--max_epochs` to avoid exhausting the Colab session limit (~12h for free tier).
+
+## UI Application
+
+Interactive PyQt5 desktop app for sketching offensive plays and visualizing generated defensive responses:
 
 ```bash
 cd ui
 python Main.py
 ```
 
-### Docker (Recommended for Training)
+Requires a pre-trained model checkpoint placed at `ui/Data/checkpoints/`.
 
-```bash
-docker run --runtime=nvidia -it --rm -v $PWD:$PWD --net host nvcr.io/nvidia/tensorflow:19.06-py2 bash
+## Project Structure
+
 ```
-
-### Google Colab
-
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/TQG1997/basketball/blob/main/notebooks/train.ipynb)
-
-Or set up manually in a Colab notebook:
-
-```python
-# 1. Clone the repository
-!git clone https://github.com/TQG1997/basketball.git
-%cd basketball
-
-# 2. Install dependencies (Colab has TF2 pre-installed)
-!pip install -r requirements.txt
-
-# 3. Download dataset from Google Drive (see links below)
-#    Place the .npy files under data/
-
-# 4. Mount Google Drive for checkpoint persistence
-from google.colab import drive
-drive.mount('/content/drive')
-
-# 5. Train (checkpoints + logs saved to Drive)
-!python src/Train_Triple.py \
-    --folder_path='/content/drive/MyDrive/basketballgan/tmp' \
-    --data_path='data' \
-    --max_epochs=500 \
-    --batch_size=64
+Basketball/
+├── src/                    # VAE-GAN model + training pipeline
+│   ├── Train_Triple.py     # Training entry point
+│   ├── ThreeDiscrim.py     # VAE-GAN model (encoder, generator, 3 discriminators)
+│   ├── ops.py              # Spectral norm, conv1d, residual blocks
+│   ├── utils.py            # DataFactory re-export
+│   └── game_visualizer.py  # Play animation (matplotlib)
+├── ui/                     # PyQt5 interactive sketch-to-play app
+│   ├── Main.py             # Main window
+│   ├── Drawingboard.py     # Sketch input (ball + 5 offence players)
+│   ├── Court.py            # Court playback (matplotlib canvas)
+│   ├── WGAN.py             # Model loading & inference
+│   ├── SavePos.py          # Bezier curve trajectory smoothing
+│   ├── draw_feat.py        # Ball-possession feature extraction
+│   └── ...
+├── shared/                 # Shared code (DataFactory singleton)
+├── DataTranslater/         # Data conversion utilities
+├── notebooks/              # Colab training notebook
+├── data/                   # Dataset (.npy files, excluded from git)
+└── requirements.txt
 ```
-
-> **Note:** Use **Runtime → Change runtime type → T4 GPU** for free GPU acceleration.
-> Set `--max_epochs` to avoid exhausting the Colab session limit (~12h for free tier).
 
 ## Dataset
 
@@ -118,15 +79,15 @@ drive.mount('/content/drive')
 
 | File | Shape | Type | Size | Description |
 |---|---|---|---|---|
-| `50Real.npy` | (14032, 50, 11, 4) | float64 | 236MB | Ground truth plays: ball trajectory + player positions (50 timesteps) |
-| `50Seq.npy` | (14032, 50, 12) | float64 | 64MB | Offence conditioning sequences (ball + 5 offence players x,y) |
-| `FEATURES-4.npy` | (11863, 100, 11, 4) | float64 | 398MB | Full-length ground truth (100 timesteps), no truncation |
-| `RealCond.npy` | (14032, 50, 6) | int32 | 16MB | Ball status features for ground truth plays (binary indicators) |
-| `SeqCond.npy` | (14032, 50, 6) | int32 | 16MB | Ball status features for conditioning sequences (binary indicators) |
+| `50Real.npy` | (14032, 50, 11, 4) | float64 | 236MB | Ground truth plays: ball + player positions (50 timesteps) |
+| `50Seq.npy` | (14032, 50, 12) | float64 | 64MB | Offence conditioning (ball + 5 offence players x,y) |
+| `FEATURES-4.npy` | (11863, 100, 11, 4) | float64 | 398MB | Full-length ground truth (100 timesteps) |
+| `RealCond.npy` | (14032, 50, 6) | int32 | 16MB | Ball status features for ground truth plays |
+| `SeqCond.npy` | (14032, 50, 6) | int32 | 16MB | Ball status features for conditioning sequences |
 
 ### Feature Layout
 
-**50Real.npy** — 4D tensor organized as `[sample, timestep, entity, feature]`:
+**50Real.npy** — 4D tensor `[sample, timestep, entity, feature]`:
 
 ```
 entity 0:     ball           (x, y, z, flag)
@@ -138,36 +99,27 @@ entity 6-10:  defence B1-B5  (x, y, z, flag)
 - `z`: ball height (ball only; player z is 0)
 - `flag`: `1` for ball, `0` for players
 
-**50Seq.npy** — 3D tensor `[sample, timestep, feature]`, each timestep contains 12 values:
+**50Seq.npy** — 3D tensor `[sample, timestep, feature]`, each timestep: `[ball.x, ball.y, A1.x, A1.y, A2.x, A2.y, A3.x, A3.y, A4.x, A4.y, A5.x, A5.y]`
 
-```
-[ball.x, ball.y, A1.x, A1.y, A2.x, A2.y, A3.x, A3.y, A4.x, A4.y, A5.x, A5.y]
-```
-
-**RealCond.npy / SeqCond.npy** — 3D tensor `[sample, timestep, feature]`, each timestep has 6 binary ball-status indicators:
-
-```
-[dribble_by_A1, dribble_by_A2, dribble_by_A3, dribble_by_A4, dribble_by_A5, pass]
-```
-
-Exactly one is `1` per timestep (one-hot state of which player has possession).
-
-### Data Split
-
-The dataset is split 9:1 into training and validation sets (by the `DataFactory` class in `utils.py`). No shuffle is applied before the split; it assumes the data is already randomly ordered.
+**RealCond.npy / SeqCond.npy** — 3D tensor `[sample, timestep, feature]`, one-hot ball-possession: `[dribble_by_A1, ..., dribble_by_A5, pass]`
 
 ### Source
 
-Download the original dataset from the [BasketballGAN Google Drive folder](https://drive.google.com/drive/folders/1uNPw7LOA3xENclQRtSlUftiR7tlVNOts?usp=share_link). The data consists of NBA play-by-play tracking data, processed into fixed-length game segments.
+Download from [Google Drive](https://drive.google.com/drive/folders/1uNPw7LOA3xENclQRtSlUftiR7tlVNOts?usp=share_link). Data consists of NBA play-by-play tracking processed into fixed-length game segments, split 9:1 into train/validation by `DataFactory`.
 
+## Training Options
 
-## Citation
-
-```
-@article{hsieh2019basketballgan,
-  title={BasketballGAN: Generating Basketball Play Simulation Through Sketching},
-  author={Hsieh, Hsin-Ying and Chen, Chieh-Yu and Wang, Yu-Shuen and Chuang, Jung-Hong},
-  journal={arXiv preprint arXiv:1909.07088},
-  year={2019}
-}
-```
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--folder_path` | — | Output directory (checkpoints, samples, logs) |
+| `--data_path` | — | Directory containing .npy dataset files |
+| `--batch_size` | 128 | Batch size (reduce if OOM) |
+| `--max_epochs` | None | Stop after N epochs (None = run forever) |
+| `--latent_dims` | 150 | Latent z dimension |
+| `--lr_` | 1e-4 | Adam learning rate |
+| `--beta` | 0.001 | KL divergence weight (β-VAE) |
+| `--recon_weight` | 1.0 | L1 reconstruction loss weight |
+| `--n_filters` | 256 | Conv filters per layer |
+| `--n_resblock` | 8 | Residual blocks per network |
+| `--checkpoint_step` | 100 | Epochs between checkpoint saves |
+| `--vis_freq` | 5 | Epochs between sample visualizations |
