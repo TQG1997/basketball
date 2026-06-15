@@ -7,17 +7,15 @@ A **Diffusion Model** (DDPM + DDIM) that generates realistic defensive player mo
 ## Quick Start
 
 ```bash
-# 1. Clone
 git clone https://github.com/TQG1997/basketball.git
 cd basketball
-
-# 2. Install dependencies
 pip install -r requirements.txt
 
-# 3. Download dataset from Google Drive and place .npy files under data/
-#    https://drive.google.com/drive/folders/1uNPw7LOA3xENclQRtSlUftiR7tlVNOts
+# Download dataset (~730MB)
+pip install gdown
+gdown --folder https://drive.google.com/drive/folders/1uNPw7LOA3xENclQRtSlUftiR7tlVNOts -O data/
 
-# 4. Train
+# Train
 python src/train.py --data_path=data --output=output --max_epochs=500
 ```
 
@@ -25,13 +23,9 @@ python src/train.py --data_path=data --output=output --max_epochs=500
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/TQG1997/basketball/blob/main/notebooks/train.ipynb)
 
-Use **Runtime → Change runtime type → T4 GPU**. The notebook handles everything end-to-end.
-
-> Set `--max_epochs` to avoid exhausting the Colab session limit (~12h for free tier).
+One-click training on free GPU. Use **Runtime → Change runtime type → T4 GPU**.
 
 ## Web UI
-
-Modern Gradio web interface — sketch plays and visualize generated defense in your browser:
 
 ```bash
 pip install gradio
@@ -39,9 +33,7 @@ python ui/app.py              # http://127.0.0.1:7860
 python ui/app.py --share      # public link
 ```
 
-Three tabs: upload `.npy` sketch file, interactive court click-to-place, or read about the model.
-
-Requires a trained checkpoint at `ui/Data/checkpoints/model_epoch500.pt`.
+Interactive browser interface: upload sketches, place points on court, view generated plays. Requires a trained checkpoint at `ui/Data/checkpoints/model_epoch500.pt`.
 
 ## Project Structure
 
