@@ -8,13 +8,13 @@ Usage:
     python ui/app.py --share             # public link
 """
 
-import os, sys, argparse, tempfile, io
+import os, sys, argparse, tempfile
 import numpy as np
 import torch
 import matplotlib
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
-from matplotlib.patches import Circle, FancyBboxPatch
+from matplotlib.patches import Circle
 
 _app_dir = os.path.dirname(os.path.abspath(__file__))
 _project_root = os.path.dirname(_app_dir)
@@ -126,15 +126,16 @@ _state = PlayState()
 #   Court Rendering (matplotlib → PNG)
 # ---------------------------------------------------------------------------
 
+_court_cache = os.path.join(_app_dir, 'Points', '_court.png')
+
 def render_court():
-    """Render court with players and ball trajectory as a PNG buffer."""
+    """Render court to a PNG file, return path. Players + ball trajectory on court bg."""
     fig, ax = plt.subplots(figsize=(6, 3.2), dpi=100)
     ax.set_xlim(CX_MIN, CX_MAX)
     ax.set_ylim(CY_MIN, CY_MAX)
     ax.axis('off')
     fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
 
-    # Court background
     if os.path.exists(BACKGROUND):
         bg = plt.imread(BACKGROUND)
         ax.imshow(bg, extent=[0, 94, 50, 0], aspect='auto', zorder=0)
@@ -142,7 +143,8 @@ def render_court():
 
     # Basket
     ax.add_patch(Circle(BASKET_POS, 1.0, color='orange', ec='darkorange', lw=2, zorder=10))
-    ax.annotate('🏀', BASKET_POS, ha='center', va='center', fontsize=8, zorder=11)
+    ax.text(*BASKET_POS, 'B', ha='center', va='center', fontsize=8,
+            fontweight='bold', color='darkorange', zorder=11)
 
     # Players
     for i, name in enumerate(PLAYER_ORDER):
@@ -158,17 +160,15 @@ def render_court():
     if _state.ball_path:
         bx, by = _state.ball_path[-1]
         ax.add_patch(Circle((bx, by), 0.9, color=BALL_COLOR, ec='#e67e22', lw=1, zorder=12))
-        ax.add_patch(Circle((bx, by), 0.5, color='#f39c12', ec='none', zorder=13))
 
-    # Legend
-    ax.text(48, 2, f'🏀 {len(_state.ball_path)} points', fontsize=7, color='#555',
+    ax.text(48, 2, f'Ball: {len(_state.ball_path)} pts | Click player=move, empty=add path',
+            fontsize=6, color='#555',
             bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='#ddd', alpha=0.9))
 
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png', dpi=100, bbox_inches='tight', pad_inches=0.05)
+    os.makedirs(os.path.dirname(_court_cache), exist_ok=True)
+    fig.savefig(_court_cache, format='png', dpi=100, bbox_inches='tight', pad_inches=0.05)
     plt.close(fig)
-    buf.seek(0)
-    return buf
+    return _court_cache
 
 
 # ---------------------------------------------------------------------------
@@ -177,8 +177,11 @@ def render_court():
 
 def handle_court_click(evt: gr.SelectData):
     """Click: if near a player → move them; else → add ball point."""
-    # Convert pixel → court coords
-    img_w, img_h = 600, 320
+    # Read actual image dimensions for pixel→court conversion
+    from PIL import Image
+    img = Image.open(_court_cache)
+    img_w, img_h = img.size
+    # Gradio select returns (x, y) in image pixel space
     cx = evt.index[0] / img_w * COURT_W + CX_MIN
     cy = evt.index[1] / img_h * COURT_H + CY_MIN
 
@@ -321,7 +324,7 @@ def create_ui():
     footer { display: none !important; }
     .gradio-container { max-width: 1200px !important; }
     """
-    with gr.Blocks(title='Basketball Play Generator', theme=gr.themes.Soft(), css=css) as demo:
+    with gr.Blocks(title='Basketball Play Generator') as demo:
         gr.Markdown("""
         # 🏀 Basketball Play Generator
         ### Click court to move players or draw ball path → Generate AI defense
@@ -332,8 +335,8 @@ def create_ui():
             with gr.Column(scale=5):
                 court_display = gr.Image(
                     value=render_court(),
-                    label='🖱️ Click near a player to move · Click empty space to draw ball path',
-                    type='filepath', height=360, show_label=True)
+                    label='Click player to move · Click court to draw ball path',
+                    type='filepath', height=360)
 
                 with gr.Row():
                     gr.Markdown(_status_text(), every=0.1, elem_id='status-md')
@@ -385,7 +388,7 @@ def main():
     args = parser.parse_args()
     global _model
     _model = ModelManager(checkpoint_path=args.checkpoint)
-    create_ui().launch(server_port=args.port, share=args.share)
+    create_ui().launch(server_port=args.port, share=args.share, theme='soft')
 
 
 if __name__ == '__main__':
