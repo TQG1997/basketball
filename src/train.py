@@ -1,8 +1,7 @@
 """BasketballGAN — PyTorch Lightning diffusion training.
 
 Usage:
-    python src/train_torch.py --config config/config.yaml
-    python src/train_torch.py training.max_epochs=500 training.batch_size=32
+    python src/train.py --data_path=data --output=output --max_epochs=500
 """
 
 import os
@@ -18,7 +17,7 @@ from torch.utils.data import Dataset, DataLoader
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared import DataFactory
 
-from diffusion_torch import GaussianDiffusion, DenoiserNet, sinusoidal_embedding
+from diffusion import GaussianDiffusion, DenoiserNet
 import game_visualizer
 
 # Optional: PyTorch Lightning

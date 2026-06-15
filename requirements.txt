@@ -1,10 +1,6 @@
-# ---- Deep Learning Framework (choose one) ----
-# PyTorch (recommended — diffusion training)
+# ---- Deep Learning Framework ----
 torch>=2.1
 lightning>=2.1
-
-# TensorFlow 2.16+ (Keras 3 — legacy VAE-GAN model)
-# tensorflow>=2.16
 
 # Core numerical
 numpy>=1.24

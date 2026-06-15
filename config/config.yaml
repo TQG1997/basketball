@@ -1,8 +1,5 @@
-# BasketballGAN — configuration
-# Override any param via CLI or YAML
-
-# Framework: "torch" (recommended) or "tensorflow" (legacy VAE-GAN)
-framework: torch
+# BasketballGAN — PyTorch diffusion model configuration
+# Override via CLI: python src/train.py --max_epochs 500 --batch_size 32
 
 defaults:
   - _self_
