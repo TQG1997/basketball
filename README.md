@@ -15,8 +15,8 @@ pip install -r requirements.txt
 pip install gdown
 gdown --folder https://drive.google.com/drive/folders/1uNPw7LOA3xENclQRtSlUftiR7tlVNOts -O data/
 
-# Train
-python src/train.py --data_path=data --output=output --max_epochs=500
+# Train (auto-tunes batch/filters for your GPU)
+python src/train.py --data_path=data --output=output --max_epochs=500 --auto --yes
 ```
 
 ## Google Colab
@@ -72,8 +72,18 @@ Basketball/
 | `--ddim_steps` | `50` | DDIM sampling steps |
 | `--checkpoint_step` | `100` | Epochs between checkpoints |
 | `--vis_freq` | `10` | Epochs between visualizations |
+| `--auto` | `false` | Auto-tune batch/filters for GPU VRAM (80% target) |
+| `--yes` | `false` | Skip output-dir confirmation prompt |
 
-See `config/config.yaml` for all settings.
+Use `--auto` for automatic VRAM-aware configuration:
+
+| GPU | VRAM | --auto sets |
+|-----|------|-------------|
+| T4 (Colab free) | 15 GB | batch=256, filters=512, resblocks=8 |
+| A10G | 24 GB | batch=512, filters=768, resblocks=12 |
+| A100 | 40 GB | batch=512, filters=768, resblocks=12 |
+
+Override any auto setting: `--auto --batch_size=128`. See `config/config.yaml` for all settings.
 
 ## Architecture
 
