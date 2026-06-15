@@ -1,17 +1,20 @@
 """Basketball play generation — Gradio web interface.
 
+Mimics the original PyQt5 UX: visual court with players + ball trajectory,
+click-based interaction, side-by-side sketch & simulation.
+
 Usage:
     python ui/app.py                     # http://127.0.0.1:7860
     python ui/app.py --share             # public link
-    python ui/app.py --checkpoint path   # custom model checkpoint
 """
 
-import os
-import sys
-import argparse
-import tempfile
+import os, sys, argparse, tempfile, io
 import numpy as np
 import torch
+import matplotlib
+matplotlib.use('agg')
+import matplotlib.pyplot as plt
+from matplotlib.patches import Circle, FancyBboxPatch
 
 _app_dir = os.path.dirname(os.path.abspath(__file__))
 _project_root = os.path.dirname(_app_dir)
@@ -32,27 +35,26 @@ import game_visualizer
 import draw_feat
 
 
+# ---- Paths & constants ----
 MODEL_PATH = os.path.join(_app_dir, 'Data', 'checkpoints', 'model_epoch500.pt')
 DATA_DIR = os.path.join(_app_dir, 'Data', 'Model_data')
-COURT_IMAGE = os.path.join(_app_dir, 'images', 'court.png')
+BACKGROUND = os.path.join(_app_dir, 'images', 'court.png')
+DDIM_STEPS, DIFFUSION_T, N_LATENT, SEQ_LEN = 50, 1000, 100, 50
 
-DDIM_STEPS = 50
-DIFFUSION_T = 1000
-N_LATENT = 100
-SEQ_LEN = 50
+# Court bounds (half-court right side, in feet)
+CX_MIN, CX_MAX = 47, 94
+CY_MIN, CY_MAX = 0, 50
+COURT_W, COURT_H = CX_MAX - CX_MIN, CY_MAX - CY_MIN
 
-# Court dimensions (feet — half-court right side)
-COURT_X_MIN, COURT_X_MAX = 47, 94
-COURT_Y_MIN, COURT_Y_MAX = 0, 50
-
-# Default offensive positions (spread formation at half-court right side)
-DEFAULT_PLAYERS = {
-    'PG': (60, 30),   # Point Guard — top of key area
-    'SG': (70, 35),   # Shooting Guard — right wing
-    'SF': (65, 20),   # Small Forward — left wing
-    'PF': (55, 15),   # Power Forward — left post
-    'C':  (50, 25),   # Center — paint area
+# Player names and default positions (spread offense)
+PLAYER_DEFAULTS = {
+    'PG': (60, 30), 'SG': (70, 35), 'SF': (65, 20),
+    'PF': (55, 15), 'C':  (50, 25),
 }
+PLAYER_ORDER = ['PG', 'SG', 'SF', 'PF', 'C']
+PLAYER_COLORS = ['#e74c3c', '#e67e22', '#2ecc71', '#3498db', '#9b59b6']
+BASKET_POS = (89, 25)   # basket position in court coords
+BALL_COLOR = '#f1c40f'
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +70,6 @@ class ModelManager:
         if self._loaded:
             return
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        print(f'Device: {self.device}')
         try:
             real_data = np.load(os.path.join(DATA_DIR, '50Real.npy'))[:, :50, :, :]
             seq_data = np.load(os.path.join(DATA_DIR, '50Seq.npy'))
@@ -76,7 +77,6 @@ class ModelManager:
             real_feat = np.load(os.path.join(DATA_DIR, 'RealCond.npy'))
             self.data_factory = DataFactory(real_data, seq_data, features_, real_feat)
         except FileNotFoundError:
-            print('Data files not found — normalization skipped')
             self.data_factory = None
         self.diffusion = GaussianDiffusion(T=DIFFUSION_T).to(self.device)
         self.denoiser = DenoiserNet(
@@ -87,9 +87,6 @@ class ModelManager:
             state = ckpt.get('ema_state_dict') or ckpt.get('model_state_dict')
             if state:
                 self.denoiser.load_state_dict(state, strict=False)
-            print(f'Loaded: {self.checkpoint_path}')
-        else:
-            print('WARNING: no checkpoint — random weights')
         self.denoiser.eval()
         self._loaded = True
 
@@ -98,118 +95,179 @@ class ModelManager:
         conds_t = torch.from_numpy(conds).float().to(self.device)
         B, T, _ = conds_t.shape
         with torch.no_grad():
-            gen = self.diffusion.sample(self.denoiser, conds_t, [B, T, 16], steps=DDIM_STEPS)
-        return gen.cpu().numpy()
+            return self.diffusion.sample(self.denoiser, conds_t, [B, T, 16], steps=DDIM_STEPS).cpu().numpy()
 
 
 _model = ModelManager()
 
 
 # ---------------------------------------------------------------------------
-#   Pipeline: player positions + ball clicks → video
+#   Play State
 # ---------------------------------------------------------------------------
 
-class PlayDesigner:
-    """Manages offensive play state: 5 players + ball trajectory."""
-
+class PlayState:
+    """Holds current offensive formation + ball path."""
     def __init__(self):
         self.reset()
 
     def reset(self):
-        self.player_positions = dict(DEFAULT_PLAYERS)
-        self.ball_clicks = []  # list of (x_court, y_court)
+        self.players = dict(PLAYER_DEFAULTS)  # {name: (x, y)}
+        self.ball_path = []                    # [(x, y), ...]
 
-    def set_player(self, name, x, y=None):
-        if y is None:
-            y = self.player_positions[name][1]
-        self.player_positions[name] = (float(x), float(y))
-
-    def add_ball_click(self, court_x, court_y):
-        self.ball_clicks.append((court_x, court_y))
-
-    def clear_ball(self):
-        self.ball_clicks = []
-
-    def build_points(self):
-        """Convert player positions + ball clicks → points.npy format.
-
-        Returns (points_array, status_msg). points_array is [N, 12] where
-        12 = ball_xy + PG_xy + SG_xy + SF_xy + PF_xy + C_xy.
-        """
-        if len(self.ball_clicks) < 3:
-            return None, f'Need ≥3 ball trajectory points (have {len(self.ball_clicks)})'
-
-        clicks = np.array(self.ball_clicks)
-        N = len(clicks)
-        points = np.zeros((N, 12), dtype=np.float32)
-
-        # Ball trajectory
-        points[:, 0:2] = clicks
-
-        # Player paths: interpolate from initial positions toward ball
-        player_names = ['PG', 'SG', 'SF', 'PF', 'C']
-        for j, name in enumerate(player_names):
-            px, py = self.player_positions[name]
-            for t in range(N):
-                frac = t / max(N - 1, 1)
-                # Players move partially toward ball's current position
-                target_x = clicks[t, 0] * 0.3 + px * 0.7
-                target_y = clicks[t, 1] * 0.3 + py * 0.7
-                points[t, 2 + j * 2] = target_x
-                points[t, 2 + j * 2 + 1] = target_y
-
-        points = points * 10  # scale to original coordinate system
-        save_dir = os.path.join(_app_dir, 'Points')
-        os.makedirs(save_dir, exist_ok=True)
-        path = os.path.join(save_dir, 'current_play.npy')
-        np.save(path, points)
-        return path, f'OK: {N} frames, 5 players + ball'
+    @property
+    def ball_path_count(self):
+        return len(self.ball_path)
 
 
-_designer = PlayDesigner()
-_last_generated_video = None
+_state = PlayState()
+
+
+# ---------------------------------------------------------------------------
+#   Court Rendering (matplotlib → PNG)
+# ---------------------------------------------------------------------------
+
+def render_court():
+    """Render court with players and ball trajectory as a PNG buffer."""
+    fig, ax = plt.subplots(figsize=(6, 3.2), dpi=100)
+    ax.set_xlim(CX_MIN, CX_MAX)
+    ax.set_ylim(CY_MIN, CY_MAX)
+    ax.axis('off')
+    fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
+
+    # Court background
+    if os.path.exists(BACKGROUND):
+        bg = plt.imread(BACKGROUND)
+        ax.imshow(bg, extent=[0, 94, 50, 0], aspect='auto', zorder=0)
+    ax.set_xlim(CX_MIN, CX_MAX)
+
+    # Basket
+    ax.add_patch(Circle(BASKET_POS, 1.0, color='orange', ec='darkorange', lw=2, zorder=10))
+    ax.annotate('🏀', BASKET_POS, ha='center', va='center', fontsize=8, zorder=11)
+
+    # Players
+    for i, name in enumerate(PLAYER_ORDER):
+        x, y = _state.players[name]
+        ax.add_patch(Circle((x, y), 1.8, color=PLAYER_COLORS[i], ec='white', lw=1.5, zorder=10))
+        ax.annotate(name, (x, y), ha='center', va='center', fontsize=6,
+                    fontweight='bold', color='white', zorder=11)
+
+    # Ball trajectory
+    if len(_state.ball_path) >= 2:
+        pts = np.array(_state.ball_path)
+        ax.plot(pts[:, 0], pts[:, 1], '-', color=BALL_COLOR, lw=2, zorder=8, alpha=0.8)
+    if _state.ball_path:
+        bx, by = _state.ball_path[-1]
+        ax.add_patch(Circle((bx, by), 0.9, color=BALL_COLOR, ec='#e67e22', lw=1, zorder=12))
+        ax.add_patch(Circle((bx, by), 0.5, color='#f39c12', ec='none', zorder=13))
+
+    # Legend
+    ax.text(48, 2, f'🏀 {len(_state.ball_path)} points', fontsize=7, color='#555',
+            bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='#ddd', alpha=0.9))
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=100, bbox_inches='tight', pad_inches=0.05)
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
+# ---------------------------------------------------------------------------
+#   Interaction Logic
+# ---------------------------------------------------------------------------
+
+def handle_court_click(evt: gr.SelectData):
+    """Click: if near a player → move them; else → add ball point."""
+    # Convert pixel → court coords
+    img_w, img_h = 600, 320
+    cx = evt.index[0] / img_w * COURT_W + CX_MIN
+    cy = evt.index[1] / img_h * COURT_H + CY_MIN
+
+    # Check if near a player (within 5 feet)
+    for name in PLAYER_ORDER:
+        px, py = _state.players[name]
+        if np.sqrt((cx - px)**2 + (cy - py)**2) < 4:
+            _state.players[name] = (cx, cy)
+            return render_court(), _status_text()
+
+    # Otherwise add ball point
+    _state.ball_path.append((cx, cy))
+    return render_court(), _status_text()
+
+
+def reset_all():
+    _state.reset()
+    return render_court(), _status_text(), None, None, 'Ready — click court to place players & ball path'
+
+
+def _status_text():
+    lines = []
+    for name in PLAYER_ORDER:
+        x, y = _state.players[name]
+        lines.append(f'**{name}**: ({x:.0f}, {y:.0f})')
+    lines.append(f'**🏀 Ball**: {_state.ball_path_count} points')
+    return '\n'.join(lines)
+
+
+# ---------------------------------------------------------------------------
+#   Generation Pipeline
+# ---------------------------------------------------------------------------
+
+_last_sim_video = None
 _last_sketch_video = None
 
 
 def render_sketch_video():
     """Render current offensive sketch as animation."""
-    path, _ = _designer.build_points()
-    if path is None:
+    if _state.ball_path_count < 3:
         return None
-    points = np.load(path) / 10  # undo ×10 scale for display
-    # Build full 22-dim: ball_xy + 5 players xy
-    full = points[:, :12]  # [N, 12]
-    # Pad to 22 dims (defense = zeros)
-    padded = np.zeros((len(full), 22), dtype=np.float32)
-    padded[:, :12] = full
+    pts = np.zeros((_state.ball_path_count, 22), dtype=np.float32)
+    for t, (bx, by) in enumerate(_state.ball_path):
+        pts[t, 0] = bx
+        pts[t, 1] = by
+        for j, name in enumerate(PLAYER_ORDER):
+            px, py = _state.players[name]
+            frac = t / max(_state.ball_path_count - 1, 1)
+            pts[t, 2 + j * 2] = px * (1 - frac * 0.3)
+            pts[t, 2 + j * 2 + 1] = py * (1 - frac * 0.3)
     with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as f:
         vpath = f.name
-    game_visualizer.plot_data(padded[None, :, :], SEQ_LEN, file_path=vpath, if_save=True)
+    game_visualizer.plot_data(pts[None, :, :], SEQ_LEN, file_path=vpath, if_save=True)
     return vpath
 
 
-def run_generate(seed):
-    """Full generate pipeline. Returns (sim_video, sketch_video, status)."""
-    global _last_generated_video, _last_sketch_video
-    path, msg = _designer.build_points()
-    if path is None:
-        return None, None, msg
-
-    # Render sketch first
-    _last_sketch_video = render_sketch_video()
+def generate(seed):
+    global _last_sim_video, _last_sketch_video
+    if _state.ball_path_count < 3:
+        return None, None, 'Need ≥3 ball path points'
 
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    points = np.load(path)
+    # Build points array [N, 12]
+    N = _state.ball_path_count
+    points = np.zeros((N, 12), dtype=np.float32)
+    clicks = np.array(_state.ball_path)
+    points[:, 0:2] = clicks
+    for j, name in enumerate(PLAYER_ORDER):
+        px, py = _state.players[name]
+        for t in range(N):
+            frac = t / max(N - 1, 1)
+            points[t, 2 + j * 2] = px * (1 - frac * 0.3) + clicks[t, 0] * frac * 0.3
+            points[t, 2 + j * 2 + 1] = py * (1 - frac * 0.3) + clicks[t, 1] * frac * 0.3
+    points *= 10
+
+    # Save + render sketch
+    os.makedirs(os.path.join(_app_dir, 'Points'), exist_ok=True)
+    np.save(os.path.join(_app_dir, 'Points', 'current_play.npy'), points)
+    _last_sketch_video = render_sketch_video()
+
+    # Pad like original
     front = np.tile(points[0], (2, 1))
     points = np.concatenate([front, points])
-    extra = np.tile(points[-1], (4, 1))
-    points = np.concatenate([points, extra])
+    points = np.concatenate([points, np.tile(points[-1], (4, 1))])
 
     feature = draw_feat.get_feature(points)
-    T_len = len(points)
-    dims = 10
+    T_len, dims = len(points), 10
     points_batch = np.reshape(np.tile(points, (dims, 1)), [dims, T_len, 12])
     feature_batch = np.repeat(feature, dims, axis=0)
 
@@ -220,179 +278,99 @@ def run_generate(seed):
     ], axis=-1)
     if _model.data_factory:
         team_AB = _model.data_factory.normalize(team_AB)
-    team_A = team_AB[:, :, :12]
-    team_Feat = team_AB[:, :, 12:]
-    conds_full = np.concatenate([team_A, team_Feat], axis=-1)
+
+    conds_full = np.concatenate([team_AB[:, :, :12], team_AB[:, :, 12:]], axis=-1)
 
     results = []
     for idx in range(dims):
         conds = np.repeat(conds_full[idx:idx + 1], N_LATENT, axis=0)
-        gen = _model.generate(conds)
-        results.append(gen)
+        results.append(_model.generate(conds))
     results = np.stack(results, axis=1)
 
-    # Median score pick
-    scores = [np.mean(np.abs(np.diff(results[i, 0, :, :10], axis=0)))
-              for i in range(N_LATENT)]
-    best_gen = results[int(np.argsort(scores)[len(scores) // 2]), 0]
+    scores = [np.mean(np.abs(np.diff(results[i, 0, :, :10], axis=0))) for i in range(N_LATENT)]
+    best = results[int(np.argsort(scores)[len(scores) // 2]), 0]
 
     if _model.data_factory:
-        off_np = team_A[0]
-        full = np.concatenate([off_np, best_gen[:, :10]], axis=-1)[None, :, :]
+        off = team_AB[0, :, :12]
+        full = np.concatenate([off, best[:, :10]], axis=-1)[None, :, :]
         full = _model.data_factory.recover_BALL_and_A(full)
-        full = _model.data_factory.recover_B(full)
-        full = full[0]
+        full = _model.data_factory.recover_B(full)[0]
     else:
-        full = np.concatenate([team_A[0], best_gen[:, :10]], axis=-1)
+        full = np.concatenate([team_AB[0, :, :12], best[:, :10]], axis=-1)
 
     with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as f:
         vpath = f.name
     game_visualizer.plot_data(full[None, :, :], SEQ_LEN, file_path=vpath, if_save=True)
-    _last_generated_video = vpath
-    return _last_generated_video, _last_sketch_video, '✅ Generation complete'
+    _last_sim_video = vpath
+    return _last_sim_video, _last_sketch_video, '✅ Done — generated defense play'
 
 
-# ---------------------------------------------------------------------------
-#   Gradio event handlers
-# ---------------------------------------------------------------------------
-
-def on_court_click(evt: gr.SelectData):
-    """Convert pixel click → court coordinates."""
-    img_w, img_h = 600, 315
-    cx = evt.index[0] / img_w * (COURT_X_MAX - COURT_X_MIN) + COURT_X_MIN
-    cy = evt.index[1] / img_h * (COURT_Y_MAX - COURT_Y_MIN) + COURT_Y_MIN
-    _designer.add_ball_click(cx, cy)
-    return _format_state()
-
-def on_clear():
-    _designer.reset()
-    return _format_state()
-
-def on_generate(seed):
-    sim_video, sketch_video, status = run_generate(seed)
-    if sim_video is None:
-        return None, None, status
-    return sim_video, sketch_video, status
-
-def on_view_mode_change(mode):
-    """Switch between generated simulation and sketch animation."""
+def switch_view(mode):
     if 'Simulation' in mode:
-        return _last_generated_video, 'Showing generated defensive play'
+        return _last_sim_video, f'Showing: {mode}'
     else:
-        return _last_sketch_video, 'Showing offensive sketch'
-
-def _format_state():
-    lines = []
-    lines.append(f'**🏀 Ball path:** {len(_designer.ball_clicks)} points')
-    if _designer.ball_clicks:
-        pts = ', '.join(f'({x:.0f},{y:.0f})' for x, y in _designer.ball_clicks[-5:])
-        lines.append(f'Last 5: {pts}')
-    return '\n'.join(lines)
+        return _last_sketch_video, f'Showing: {mode}'
 
 
 # ---------------------------------------------------------------------------
-#   UI Layout
+#   UI
 # ---------------------------------------------------------------------------
 
 def create_ui():
     css = """
-    .status-box { font-size: 0.9em; padding: 8px; background: #f0f0f0; border-radius: 6px; }
     footer { display: none !important; }
-    #court-container { text-align: center; }
+    .gradio-container { max-width: 1200px !important; }
     """
     with gr.Blocks(title='Basketball Play Generator', theme=gr.themes.Soft(), css=css) as demo:
         gr.Markdown("""
         # 🏀 Basketball Play Generator
-        ### Set offensive formation → Draw ball path → Generate defensive response
+        ### Click court to move players or draw ball path → Generate AI defense
         """)
 
-        # ---- Row 1: Player positions (compact) ----
-        with gr.Row():
-            with gr.Column(scale=2):
-                pg_x = gr.Slider(47, 94, value=DEFAULT_PLAYERS['PG'][0], step=1, label='PG (Point Guard)')
-            with gr.Column(scale=1):
-                pg_y = gr.Slider(0, 50, value=DEFAULT_PLAYERS['PG'][1], step=1, label='')
-        with gr.Row():
-            with gr.Column(scale=2):
-                sg_x = gr.Slider(47, 94, value=DEFAULT_PLAYERS['SG'][0], step=1, label='SG (Shooting Guard)')
-            with gr.Column(scale=1):
-                sg_y = gr.Slider(0, 50, value=DEFAULT_PLAYERS['SG'][1], step=1, label='')
-        with gr.Row():
-            with gr.Column(scale=2):
-                sf_x = gr.Slider(47, 94, value=DEFAULT_PLAYERS['SF'][0], step=1, label='SF (Small Forward)')
-            with gr.Column(scale=1):
-                sf_y = gr.Slider(0, 50, value=DEFAULT_PLAYERS['SF'][1], step=1, label='')
-        with gr.Row():
-            with gr.Column(scale=2):
-                pf_x = gr.Slider(47, 94, value=DEFAULT_PLAYERS['PF'][0], step=1, label='PF (Power Forward)')
-            with gr.Column(scale=1):
-                pf_y = gr.Slider(0, 50, value=DEFAULT_PLAYERS['PF'][1], step=1, label='')
-        with gr.Row():
-            with gr.Column(scale=2):
-                c_x = gr.Slider(47, 94, value=DEFAULT_PLAYERS['C'][0], step=1, label='C (Center)')
-            with gr.Column(scale=1):
-                c_y = gr.Slider(0, 50, value=DEFAULT_PLAYERS['C'][1], step=1, label='')
+        with gr.Row(equal_height=True):
+            # ===== LEFT: Court =====
+            with gr.Column(scale=5):
+                court_display = gr.Image(
+                    value=render_court(),
+                    label='🖱️ Click near a player to move · Click empty space to draw ball path',
+                    type='filepath', height=360, show_label=True)
 
-        # ---- Row 2: Large centered court ----
-        gr.Markdown("### 🏀 Ball Trajectory — click on court to draw")
-        court_img = gr.Image(
-            value=COURT_IMAGE if os.path.exists(COURT_IMAGE) else None,
-            label='', type='filepath', height=420, show_label=False,
-            elem_id='court-container')
+                with gr.Row():
+                    gr.Markdown(_status_text(), every=0.1, elem_id='status-md')
+                    # Actually need a component for status
+                    status_md = gr.Markdown(_status_text())
+
+            # ===== RIGHT: Result =====
+            with gr.Column(scale=5):
+                video_out = gr.Video(label='Generated Play', height=380)
+                status_out = gr.Textbox(label='Status', value='Ready — click court to begin', interactive=False)
 
         with gr.Row():
-            state_display = gr.Markdown(_format_state(), elem_classes=['status-box'])
-
-        # ---- Row 3: Controls ----
-        with gr.Row():
-            clear_btn = gr.Button('🔄 Reset All', variant='secondary', size='lg')
+            clear_btn = gr.Button('🔄 Clear All', variant='secondary', size='lg')
             seed_slider = gr.Slider(0, 200, value=0, step=1, label='🎲 Seed')
             gen_btn = gr.Button('⚡ Generate Defense', variant='primary', size='lg')
 
-        # ---- Row 4: Result (2 modes like old PyQt5) ----
-        gr.Markdown("---")
         with gr.Row():
             view_mode = gr.Radio(
-                choices=['🎬 Generated Simulation', '✏️ Sketch Animation'],
-                value='🎬 Generated Simulation', label='View Mode',
-                interactive=True)
+                ['🎬 Generated Simulation', '✏️ Sketch Animation'],
+                value='🎬 Generated Simulation', label='View Mode')
 
-        video_out = gr.Video(label='', height=460)
-        status_out = gr.Textbox(
-            label='Status',
-            value='Ready — adjust players, click court to draw ball path (≥3 points), then Generate',
-            interactive=False)
+        # ---- Events ----
+        court_display.select(
+            handle_court_click,
+            outputs=[court_display, status_md])
 
-        # ---- Event bindings ----
-        court_img.select(on_court_click, outputs=[state_display])
+        clear_btn.click(
+            reset_all,
+            outputs=[court_display, status_md, video_out, video_out, status_out])
 
-        all_sliders = [pg_x, pg_y, sg_x, sg_y, sf_x, sf_y, pf_x, pf_y, c_x, c_y]
-        player_names = ['PG', 'PG', 'SG', 'SG', 'SF', 'SF', 'PF', 'PF', 'C', 'C']
-        for i, slider in enumerate(all_sliders):
-            name = player_names[i]
-            is_x = (i % 2 == 0)
-            def make_update(n=name, ix=is_x):
-                def update(v):
-                    if ix:
-                        _designer.set_player(n, v)
-                    else:
-                        _designer.set_player(n, _designer.player_positions[n][0], v)
-                return update
-            slider.change(make_update(), inputs=[slider])
-
-        sketch_video = gr.Video(label='', height=460, visible=False)
-
-        def on_gen_wrapper(seed):
-            sim_video, sketch_v, status = on_generate(seed)
-            return sim_video, sketch_v, status
-
-        clear_btn.click(on_clear, outputs=[state_display])
         gen_btn.click(
-            on_gen_wrapper,
+            generate,
             inputs=[seed_slider],
-            outputs=[video_out, sketch_video, status_out])
+            outputs=[video_out, video_out, status_out])
+
         view_mode.change(
-            on_view_mode_change,
+            switch_view,
             inputs=[view_mode],
             outputs=[video_out, status_out])
 
