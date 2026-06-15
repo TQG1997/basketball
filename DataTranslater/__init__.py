@@ -1,1 +1,1 @@
-"""BasketballGAN — Data conversion utilities."""
+"""Data conversion utilities."""

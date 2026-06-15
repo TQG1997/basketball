@@ -1,1 +1,1 @@
-"""BasketballGAN — PyQt5 interactive sketch-to-play UI application."""
+"""Basketball play generation — Gradio web UI."""

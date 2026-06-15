@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import *
 from PyQt5.QtCore import Qt
 from Drawingboard import App
 from Court import Court
-import WGAN
+import inference as WGAN  # backward compat alias
 
 class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
@@ -98,7 +98,7 @@ class Ui_MainWindow(object):
         self.ani_button.setChecked(True)
         self.statusbar.showMessage("Done!")
 
-        self.statusbar.showMessage("BasketballGAN")
+        self.statusbar.showMessage("🏀 Basketball Play Generator")
 
     def Buttons(self,play):
         self.widget = QtWidgets.QWidget(self.centralwidget)

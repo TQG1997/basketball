@@ -1,4 +1,4 @@
-"""BasketballGAN — Gradio web interface.
+"""Basketball play generation — Gradio web interface.
 
 Usage:
     python ui/app.py                     # local: http://127.0.0.1:7860
@@ -124,7 +124,7 @@ def points_to_video(points_npy_path, seed=0):
     if points.ndim == 1:
         raise ValueError('Points file must be 2D: [N, 12]')
 
-    # Pad edges (matching original WGAN.py logic)
+    # Pad edges (matching original inference logic)
     front = np.tile(points[0], (2, 1))
     points = np.concatenate([front, points])
     extra = np.tile(points[-1], (4, 1))
@@ -284,10 +284,10 @@ def on_generate_file(points_file, seed):
 
 
 def create_ui():
-    with gr.Blocks(title='BasketballGAN', theme=gr.themes.Soft()) as demo:
+    with gr.Blocks(title='Basketball Play Generator', theme=gr.themes.Soft()) as demo:
         gr.Markdown("""
-        # 🏀 BasketballGAN
-        ### Generate defensive play simulations from offensive sketches
+        # 🏀 Basketball Play Generator
+        ### AI-powered defensive play simulation from offensive sketches
         """)
 
         with gr.Tabs():
@@ -381,7 +381,7 @@ def create_ui():
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description='BasketballGAN Web UI')
+    parser = argparse.ArgumentParser(description='Basketball Play Generator Web UI')
     parser.add_argument('--checkpoint', type=str, default=MODEL_PATH,
                         help='Path to model checkpoint (.pt)')
     parser.add_argument('--share', action='store_true',

@@ -46,7 +46,7 @@ def _check_file(filepath, description):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='BasketballGAN: Inference')
+    parser = argparse.ArgumentParser(description='Basketball Play Generation: Inference')
     parser.add_argument('--checkpoint', type=str, default=MODEL_PATH_DEFAULT,
                         help='Path to PyTorch checkpoint (.pt)')
     parser.add_argument('--points', type=str, default='Points/points2.npy')

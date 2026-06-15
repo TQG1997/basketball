@@ -1,4 +1,4 @@
-# BasketballGAN — PyTorch diffusion model configuration
+# Basketball Play Generation — PyTorch diffusion model configuration
 # Override via CLI: python src/train.py --max_epochs 500 --batch_size 32
 
 model:
@@ -23,5 +23,5 @@ diffusion:
 
 wandb:
   enabled: false
-  project: basketballgan
+  project: basketball-play-gen
   entity: null

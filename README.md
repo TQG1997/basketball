@@ -55,7 +55,7 @@ Basketball/
 │   └── utils.py                # DataFactory re-export
 ├── ui/                         # Web UI + inference
 │   ├── app.py                  # Gradio interface
-│   ├── WGAN.py                 # PyTorch inference pipeline
+│   ├── inference.py            # PyTorch inference pipeline
 │   ├── draw_feat.py            # Ball-possession feature extraction
 │   ├── SavePos.py / Bezier.py  # Trajectory smoothing
 │   └── ...

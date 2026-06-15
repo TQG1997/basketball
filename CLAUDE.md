@@ -4,105 +4,92 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-BasketballGAN is a research project (ACMMM 2019 paper) that generates defensive basketball play simulations given an offensive play sketch. It uses a **VAE-GAN** with three WGAN-GP discriminators. There are two entry points: a training pipeline (`src/`) and an interactive PyQt5 sketching UI (`ui/`).
+Basketball play generation via **Diffusion Model** (DDPM + DDIM). Given an offensive play sketch (ball trajectory + 5 players), the model generates realistic defensive player movements. Uses PyTorch with ResBlock1D + Self-Attention + Cross-Attention architecture.
+
+Two entry points: training (`src/train.py`) and Gradio web UI (`ui/app.py`).
 
 ## Commands
 
 ```bash
-# Training (requires TF1 compat, GPU, and the dataset .npy files in data/)
-cd src && python Train_Triple.py --folder_path='tmp' --data_path='../data'
+# Training
+python src/train.py --data_path=data --output=output --max_epochs=500
 
-# Interactive UI (requires pre-trained checkpoint at ui/Data/checkpoints/)
-cd ui && python Main.py
+# Gradio Web UI
+python ui/app.py              # http://127.0.0.1:7860
+python ui/app.py --share      # public link
 
-# Training via Docker (original setup)
-docker run --runtime=nvidia -it --rm -v $PWD:$PWD --net host nvcr.io/nvidia/tensorflow:19.06-py2 bash
+# Standalone visualization
+python src/game_visualizer.py --data_path=path/to/data.npy
 ```
 
-There are no tests, no linting, and no CI in this repository.
+There are no tests, linting, or CI.
 
 ## Architecture
 
-### TensorFlow constraint
+### Diffusion model (`src/diffusion.py`)
 
-The entire codebase uses **TensorFlow 1.x compat mode**. Every `.py` file that imports TF begins with:
-```python
-import tensorflow.compat.v1 as tf
-tf.disable_v2_behavior()
-```
-All graph construction uses `tf.placeholder`, `tf.get_variable`, `tf.Session`, etc. Do not use TF2 eager APIs or Keras layers when modifying model code.
+**GaussianDiffusion** (inherits `nn.Module`):
+- Forward process (q_sample): x0 → xt = √ᾱ·x0 + √(1-ᾱ)·ε
+- Reverse process: DDIM sampling (50 steps, deterministic η=0)
+- Noise schedule: linear β from 1e-4 to 0.02 over T=1000 steps
+- Uses `register_buffer` for device-safe schedule tensors
 
-### VAE-GAN model (`src/ThreeDiscrim.py`)
+**DenoiserNet** (inherits `nn.Module`):
+- Time embedding: sinusoidal → MLP(SiLU) → [B, 1, n_filters]
+- Input projection: Conv1d(16→n_filters), Cond projection: Conv1d(18→n_filters)
+- N ResBlock1D (LayerNorm+SiLU+Conv1d, no spectral norm)
+- Self-attention every 2 blocks (MultiheadAttention, batch_first=True)
+- Cross-attention to conditioning at output
+- All tensors in [B, T, C] format (permute for Conv1d)
 
-The core model (`VAEGAN_Model`) has four sub-networks:
+Data flow:
+- Target (diffused): concat(defence_xy[10], ball_features[6]) = [B,T,16]
+- Conditioning: concat(offence_xy[12], seq_feat[6]) = [B,T,18]
 
-- **Encoder (E_)**: Takes `(offence conditioning + ground-truth play)` → `z_mean, z_log_var`. Architecture: concat → conv1d → N residual blocks → global temporal pooling → dense layers.
-- **Generator/Decoder (G_)**: Takes `(offence conditioning + latent z)` → fake play `[batch, seq_len, 28]`. The 28 output channels are: 22 player positions (ball xy + 10 players xy) + 6 ball-status features (sigmoid).
-- **Three Discriminators** (shared `discriminator` method, each in its own variable scope):
-  - `O_disc`: Offence discriminator — conditioned on ground-truth defence
-  - `D_disc`: Defence discriminator — conditioned on ground-truth offence
-  - `P_disc`: Full-play discriminator — conditioned on offence sequence + features
+### Custom layers (`src/ops.py`)
 
-All use **spectral normalization** (via `ops.spectral_norm`) and **WGAN-GP gradient penalty** (`loss_d`, λ=10).
+- `Conv1D_SN`: Conv1d with `torch.nn.utils.spectral_norm`. [B,T,C] → permute → conv → permute back
+- `ResBlock1D`: LayerNorm → SiLU → Conv1d (×2) + skip connection
+- `SelfAttentionBlock`: MultiheadAttention(batch_first=True) + LayerNorm + residual
+- `CrossAttentionBlock`: MultiheadAttention(query≠key/value) + LayerNorm + residual
 
-**VAE loss**: L1 reconstruction + β-KL divergence (weighted by `--beta`, default 0.001).
+### Training (`src/train.py`)
 
-**Domain-specific penalties** (added to generator loss, scaled by |g_mean_cost|):
-- `dribbler_penalty` — distance between ball and closest offensive player near the basket
-- `_open_shot_penalty` — measures how "open" an offensive player is for a shot
-- `_pass_ball_penalty` — ball trajectory smoothness during passes
-- `_acc_penalty` — player acceleration consistency with real data
+- `BasketballDataset`: Pre-concatenates target/conds arrays in `__init__` for speed
+- Training loop: AMP (GradScaler + autocast), EMA (AveragedModel, decay=0.9999)
+- Optimizer: AdamW (β₁=0.9, β₂=0.999 — standard diffusion, no GAN β₁=0.5 hack)
+- Loss: MSE(ε_pred, ε_true)
+- Validation: configurable `valid_freq`, computes MSE on held-out set
+- Checkpoint: PyTorch `.pt` with model+EMA+optimizer state_dicts
+- Visualization: DDIM sample → recover_BALL_and_A → recover_B → MP4 via matplotlib
 
-Training loop: pretrain D for N epochs → alternating updates (train D `train_D` times, then train G once). The generator optimizer updates **both encoder and decoder variables** jointly.
+### Data pipeline (`shared/__init__.py`)
 
-### Data pipeline (`src/utils.py`)
+`DataFactory` singleton — pure numpy, framework-agnostic:
+1. Z-normalizes x/y/z positions on `__real_data` (stores mean/std)
+2. Splits 9:1 into train/valid
+3. Extracts team_A (ball xyz + 5 offence xy) = [N,T,13], team_B (5 defence xy) = [N,T,10]
+4. `normalize()` method for UI inference sketches
+5. `recover_*()` methods for denormalizing generated plays
 
-`DataFactory` is a **singleton**. On first instantiation with raw `.npy` arrays, it:
-1. Normalizes x/y/z positions (z-normalization, stores mean/std for recovery)
-2. Splits data 9:1 into train/valid (no shuffle before split — assumes random ordering)
-3. Extracts team A (ball + offence) and team B (defence) subsets
-4. Provides `shuffle_train()` / `shuffle_valid()` for per-epoch shuffling
+Data indexing hack: offence [N,T,13] → drop ball z (index 2) → [N,T,12]
 
-Data layout:
-- `50Real.npy` shape `[N, 50, 11, 4]`: entity 0=ball, 1-5=offence A, 6-10=defence B; features: x, y, z, flag
-- `50Seq.npy` shape `[N, 50, 12]`: [ball.x, ball.y, A1.x, A1.y, …, A5.x, A5.y]
-- `SeqCond.npy` / `RealCond.npy` shape `[N, 50, 6]`: one-hot ball-possession indicators (dribble_by_A1…A5, pass)
+### UI (`ui/app.py`, `ui/inference.py`)
 
-The positional indexing hack in training: `real_[:, :, [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]]` drops index 2 (ball z) — this maps the 13-element `[ball.xyz + 5 players × xy]` down to 12 features.
+- Gradio web app with 3 tabs: file upload, interactive click-to-place, model info
+- `ModelManager`: lazy-loads diffusion model + DataFactory
+- `ClickCollector`: pixel→court coordinate conversion, auto-places dummy offence players
+- `inference.py`: PyTorch pipeline (load model → normalize → DDIM sample → recover → save)
 
-### Ops (`src/ops.py`)
-
-- `spectral_norm(w, iteration=1)`: Single power iteration spectral normalization for conv kernels
-- `conv1d_sn`: 1D convolution with spectral norm, no activation, kernel size 5
-- `res_block`: Residual block with manual "same" padding (concatenating edge frames), leaky ReLU (α=0.2), skip connection scaled by `residual_alpha`
-
-### UI application (`ui/`)
-
-The UI is a **PyQt5** desktop app with two panels:
-- **Left panel**: `Drawingboard` — a `QGraphicsView` where users place 5 offensive players (double-click) and sketch ball trajectories (click-release). Uses `MovableDisk` (players) and `BallDisk` (ball with shot/pass logic).
-- **Right panel**: `Court` — matplotlib `FigureCanvas` embedded in Qt, plays back the sketch animation or the generated simulation.
-
-**Workflow**: User sketches → "Generate" button clicked → `Main.run_model()`:
-1. `Scene_.savePos()` saves the sketched trajectory to `Points/points2.npy`
-2. `WGAN.run_Model()`: loads the pre-trained checkpoint, runs inference with `use_encoder=False`, generates `n_Latent=100` defense variants for 10 condition duplicates → saves `Data/output/output.npy`
-3. User toggles "Sketch Animation" (shows input) or "Play Simulation" (shows generated defense)
-
-**Sketch data flow**: `Drawingboard` mouse events → `BallDisk.segData` (raw segments) → `SavePos.save_pos()` applies Bezier curve smoothing → `draw_feat.get_feature()` computes ball-possession features → `WGAN.run_Model()` normalizes via `DataFactory.normalize()` and runs the generator.
-
-**Pre-trained checkpoint**: The UI expects `ui/Data/checkpoints/model.ckpt-88200.meta` (hardcoded in `WGAN.py:9-10`). Model data files (`50Seq.npy`, `SeqCond.npy`, `50Real.npy`, `RealCond.npy`) must also be present in `ui/Data/Model_data/`.
-
-### Key hyperparameters
+## Key parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--latent_dims` | 150 | Latent z dimension |
-| `--seq_length` | 50 | Timesteps per play |
 | `--n_filters` | 256 | Conv filters |
-| `--n_resblock` | 8 | Residual blocks per network |
-| `--lr_` | 1e-4 | Adam learning rate |
-| `--beta` | 0.001 | KL divergence weight (β-VAE) |
-| `--recon_weight` | 1.0 | L1 reconstruction loss weight |
-| `--pretrain_D` | 25 | Epochs to pretrain discriminator |
-| `--train_D` | 5 | D updates per G update |
-| `--batch_size` | 128 | Batch size |
-| `--lambda_` | 1.0 | Decaying lambda (unused currently) |
+| `--n_resblock` | 4 | Residual blocks per network |
+| `--num_heads` | 4 | Attention heads |
+| `--T` | 1000 | Diffusion timesteps |
+| `--ddim_steps` | 50 | DDIM sampling steps |
+| `--batch_size` | 64 | Batch size |
+| `--lr` | 1e-4 | AdamW learning rate |
+| `--max_epochs` | null | Stop after N epochs |
