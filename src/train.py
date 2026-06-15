@@ -52,42 +52,48 @@ class BasketballDataset(Dataset):
 # ---------------------------------------------------------------------------
 
 def auto_configure():
-    """Scale hyperparameters to utilize ~50% of available GPU memory.
+    """Scale hyperparameters to utilize ~80% of available GPU memory.
 
-    T4 15GB  → batch=256, n_filters=512, n_resblock=8  (~7 GB)
-    A100 40GB → batch=512, n_filters=768, n_resblock=12 (~18 GB)
-    Floor 4GB → batch=32,  n_filters=128, n_resblock=3  (~1 GB)
+    Memory estimate: weights + optimizer(×3) + activations(batch × filters × T × layers).
+    Empirically: ~4 bytes/param × params × 3 + batch × T × filters × 4 × dilate.
+
+    T4 15GB  → batch=384, n_filters=1024, n_resblock=10  (~12 GB)
+    A100 40GB → batch=512, n_filters=1536, n_resblock=14  (~32 GB)
+    Floor 4GB → batch=64,  n_filters=256, n_resblock=4    (~3 GB)
     """
     if not torch.cuda.is_available():
-        return {'batch_size': 32, 'n_filters': 128, 'n_resblock': 3}
+        return {'batch_size': 32, 'n_filters': 256, 'n_resblock': 4}
 
     vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
 
-    # Target ~80% VRAM (sweet spot: enough headroom for attention spikes).
-    # 90% risks OOM from attention O(T²) intermediates + PyTorch caching.
-    budget_gb = vram_gb * 0.8
-
-    # Scale filters and resblocks with √VRAM (model capacity grows slowly)
+    # Scale model capacity with VRAM
     if vram_gb >= 24:
-        filters, resblocks = 768, 12
+        filters, resblocks = 1536, 14
     elif vram_gb >= 15:
-        filters, resblocks = 512, 8
+        filters, resblocks = 1024, 10
     elif vram_gb >= 8:
-        filters, resblocks = 384, 6
+        filters, resblocks = 512, 6
     else:
-        filters, resblocks = 192, 3
+        filters, resblocks = 256, 4
 
-    # Scale batch to fill remaining budget
-    # Rough model: memory_gb ≈ batch × filters × T × layers / 1e6
-    T_est = 50
-    layers = resblocks * 2 + 4  # convs + attention + proj
-    mem_per_sample_gb = (filters * filters * T_est * layers) / 1.5e7  # empirical
+    # Memory model: weights (~filters² × resblocks × 3 bytes × 3 for opt)
+    #               + activations (batch × T × filters × 4 bytes × dilate)
+    num_params = filters * filters * (resblocks * 2 + 4) * 3  # rough conv param count
+    weight_mem_gb = num_params * 4 / (1024**3) * 3             # FP32 + opt state
+    T = 50
 
-    batch = int(budget_gb / max(mem_per_sample_gb, 0.01))
-    batch = max(16, min(batch, 512))  # clamp to sensible range
+    # Activations scale linearly with batch, filters, T, num_layers
+    # Empirical: each sample ~ filters × T × 8 bytes × 2 (fwd+bwd) × (1+attention_factor)
+    attention_factor = 1 + (T * T) / (filters * 10) if T > 0 else 1
+    mem_per_sample_gb = filters * T * 8 * (resblocks + 3) * attention_factor / (1024**3)
 
-    print(f'Auto-config: {vram_gb:.1f}GB VRAM → budget={budget_gb:.1f}GB, '
-          f'batch={batch}, n_filters={filters}, n_resblock={resblocks}')
+    budget_gb = vram_gb * 0.8 - weight_mem_gb
+    batch = int(budget_gb / max(mem_per_sample_gb, 1e-6))
+    batch = max(16, min(batch, 512))
+
+    total_est = weight_mem_gb + batch * mem_per_sample_gb
+    print(f'Auto-config: {vram_gb:.1f}GB VRAM → batch={batch}, '
+          f'filters={filters}, resblocks={resblocks}  (est {total_est:.1f}GB)')
     return {'batch_size': batch, 'n_filters': filters, 'n_resblock': resblocks}
 
 
