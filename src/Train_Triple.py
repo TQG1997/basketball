@@ -1,9 +1,13 @@
-"""BasketballGAN training entry point (TF 2.16+ / Keras 3 / Hydra / WandB).
+"""BasketballGAN training entry — Diffusion model (TF 2.16+ / Keras 3 / Hydra / WandB).
 
 Usage:
-    python Train_Triple.py                                    # default config
-    python Train_Triple.py model.latent_dims=64 training.batch_size=32
+    python Train_Triple.py                                        # default config
+    python Train_Triple.py model.n_filters=128 training.batch_size=32
     python Train_Triple.py training.max_epochs=500 wandb.enabled=true
+
+Model types:
+    training.model_type=diffusion   (default) — DDPM + DDIM sampling
+    training.model_type=vaegan      — VAE-GAN with 3 discriminators
 """
 
 import os
@@ -16,32 +20,60 @@ import matplotlib
 matplotlib.use('agg')
 
 from utils import DataFactory
-from ThreeDiscrim import VAEGAN_Model
+from diffusion import GaussianDiffusion
+from denoiser import DenoiserNet
 import game_visualizer
 
 
-def z_samples(batch_size, latent_dims):
-    return np.random.normal(0., 1., size=[batch_size, latent_dims]).astype(np.float32)
+# ---------------------------------------------------------------------------
+#   Diffusion Trainer
+# ---------------------------------------------------------------------------
 
+class DiffusionTrainer:
+    """Simple diffusion training: forward process → predict noise → MSE loss."""
 
-class Trainer:
     def __init__(self, data_factory, cfg, checkpoint_path, sample_path):
         self.data_factory = data_factory
         self.cfg = cfg
         self.checkpoint_path = checkpoint_path
         self.sample_path = sample_path
 
-        # Build config object for model
-        model_cfg = self._make_model_config(cfg)
-        self.model = VAEGAN_Model(model_cfg)
+        m = cfg.model
+        t = cfg.training
+        d = cfg.diffusion
 
-        self.bs = cfg.training.batch_size
+        self.bs = t.batch_size
+        self.seq_len = t.seq_length
+
+        # Diffusion process
+        self.diffusion = GaussianDiffusion(
+            T=d.T, beta_start=d.beta_start, beta_end=d.beta_end)
+
+        # Denoiser network
+        self.denoiser = DenoiserNet(
+            n_filters=m.n_filters,
+            n_resblock=m.n_resblock,
+            num_heads=m.num_heads,
+            T=d.T)
+
+        # Optimizer (AdamW-style — standard for diffusion)
+        self.optimizer = tf.keras.optimizers.Adam(
+            learning_rate=t.lr_, beta_1=0.9, beta_2=0.999)
+
+        # EMA for better sampling quality
+        self.ema = tf.train.ExponentialMovingAverage(decay=0.9999)
+        self.ema_initialized = False
+
+        # Checkpoint
+        self.checkpoint = tf.train.Checkpoint(
+            denoiser=self.denoiser,
+            optimizer=self.optimizer,
+        )
+
         self.num_data = data_factory.train_data['A'].shape[0]
         self.num_batch = self.num_data // self.bs
-        self.num_batch_valid = data_factory.valid_data['A'].shape[0] // self.bs
         self.epoch_id = 0
         self.batch_id = 0
-        self.batch_id_valid = 0
 
         # WandB
         self.use_wandb = cfg.wandb.enabled
@@ -52,172 +84,169 @@ class Trainer:
                 project=cfg.wandb.project,
                 entity=cfg.wandb.entity,
                 config=OmegaConf.to_container(cfg, resolve=True))
-            # Watch model gradients
-            self.wandb_run = self.wandb
 
-        print(f'Batches per epoch: {self.num_batch}')
-        print(f'Validation batches: {self.num_batch_valid}')
+        print(f'Samples: {self.num_data}  Batches/epoch: {self.num_batch}')
+        print(f'Diffusion steps: {d.T}  DDIM sampling steps: {d.ddim_steps}')
 
-    @staticmethod
-    def _make_model_config(cfg):
-        """Build a simple config object for VAEGAN_Model."""
-        class MC:
-            pass
-        mc = MC()
-        m = cfg.model
-        t = cfg.training
-        p = cfg.paths
-        mc.batch_size = t.batch_size
-        mc.seq_length = t.seq_length
-        mc.latent_dims = m.latent_dims
-        mc.n_filters = m.n_filters
-        mc.n_resblock = m.n_resblock
-        mc.num_heads = m.num_heads
-        mc.lr_ = t.lr_
-        mc.beta = t.beta
-        mc.recon_weight = t.recon_weight
-        mc.features_ = m.features_
-        mc.features_d = m.features_d
-        mc.keep_prob = 1.0
-        mc.folder_path = p.folder_path
-        return mc
+    # ------------------------------------------------------------------
+    #   Data helpers
+    # ------------------------------------------------------------------
 
-    def _get_beta(self):
-        """Compute KL weight with linear annealing schedule."""
-        anneal_epochs = self.cfg.training.kl_anneal_epochs
-        if anneal_epochs <= 0:
-            return self.cfg.training.beta
-        ratio = min(1.0, self.epoch_id / anneal_epochs)
-        return ratio * self.cfg.training.beta
+    def _get_batch(self, idx):
+        """Return (target, conditioning) tensors.
 
-    def _get_batch(self, data_dict, seq_data, feat_data, real_feat_data, idx):
-        batch = data_dict['A'][idx:idx + self.bs]
-        batch_d = data_dict['B'][idx:idx + self.bs]
-        seq = seq_data[idx:idx + self.bs]
-        feat = feat_data[idx:idx + self.bs]
-        real_feat = real_feat_data[idx:idx + self.bs]
-        # Drop ball z (index 2): [B,T,13] → [B,T,12]
-        batch = batch[:, :, [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]]
-        return (tf.constant(batch, dtype=tf.float32),
-                tf.constant(batch_d, dtype=tf.float32),
-                tf.constant(seq, dtype=tf.float32),
-                tf.constant(feat[:, :, :], dtype=tf.float32),
-                tf.constant(real_feat[:, :, :], dtype=tf.float32))
+        target:       defence(10) + ball_features(6) = 16 dims
+        conditioning: offence(12) + seq_feat(6) = 18 dims
+        """
+        end = idx + self.bs
+        # Offence (drop ball z): [B, T, 12]
+        offence = self.data_factory.train_data['A'][idx:end]
+        offence = offence[:, :, [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]]
+        # Defence: [B, T, 10]
+        defence = self.data_factory.train_data['B'][idx:end]
+        # Features: [B, T, 6] each
+        seq_feat = self.data_factory.f_train[idx:end]
+        real_feat = self.data_factory.rf_train[idx:end]
 
-    def _prep_basket_right(self):
-        br = tf.constant(
-            [self.data_factory.BASKET_RIGHT[0],
-             self.data_factory.BASKET_RIGHT[1]], dtype=tf.float32)
-        return br
+        target = tf.concat([tf.constant(defence, dtype=tf.float32),
+                            tf.constant(real_feat, dtype=tf.float32)], axis=-1)
+        conds = tf.concat([tf.constant(offence, dtype=tf.float32),
+                           tf.constant(seq_feat, dtype=tf.float32)], axis=-1)
+        return target, conds
+
+    def _get_sample_batch(self):
+        """Get conditioning for visualization."""
+        idx = self.batch_id * self.bs
+        end = idx + self.bs
+        offence = self.data_factory.train_data['A'][idx:end]
+        offence = offence[:, :, [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]]
+        seq_feat = self.data_factory.f_train[idx:end]
+        return (tf.constant(offence, dtype=tf.float32),
+                tf.constant(seq_feat, dtype=tf.float32))
+
+    # ------------------------------------------------------------------
+    #   Training step
+    # ------------------------------------------------------------------
+
+    @tf.function
+    def _train_step(self, target, conds):
+        """One diffusion training step."""
+        B = tf.shape(target)[0]
+        t = tf.random.uniform([B], 0, self.cfg.diffusion.T, dtype=tf.int32)
+
+        # Forward diffusion: add noise
+        xt, noise = self.diffusion.q_sample(target, t)
+
+        with tf.GradientTape() as tape:
+            pred_noise = self.denoiser(xt, t, conds, training=True)
+            loss = tf.reduce_mean(tf.square(pred_noise - noise))
+
+        grads = tape.gradient(loss, self.denoiser.trainable_variables)
+        self.optimizer.apply_gradients(
+            zip(grads, self.denoiser.trainable_variables))
+
+        # Update EMA
+        if not self.ema_initialized:
+            self.ema.apply(self.denoiser.trainable_variables)
+            self.ema_initialized = True
+        else:
+            self.ema.apply(self.denoiser.trainable_variables)
+
+        return loss
+
+    # ------------------------------------------------------------------
+    #   Main loop
+    # ------------------------------------------------------------------
 
     def __call__(self):
-        br = self._prep_basket_right()
         max_epochs = self.cfg.training.max_epochs
-        pretrain_d = self.cfg.training.pretrain_D
-        train_d = self.cfg.training.train_D
-        ckpt_step = self.cfg.training.checkpoint_step
         vis_freq = self.cfg.training.vis_freq
+        ckpt_step = self.cfg.training.checkpoint_step
 
         while max_epochs is None or self.epoch_id < max_epochs:
-            num_d = 10 if self.epoch_id < pretrain_d else train_d
+            target, conds = self._get_batch(self.batch_id * self.bs)
+            loss = self._train_step(target, conds)
 
-            # ---- Train D ----
-            for _ in range(num_d):
-                real, real_d, seq, seq_feat, real_feat = self._get_batch(
-                    self.data_factory.train_data,
-                    self.data_factory.seq_train,
-                    self.data_factory.f_train,
-                    self.data_factory.rf_train,
-                    self.batch_id * self.bs)
-                self.model.train_D(real, real_d, seq, seq_feat, real_feat, br)
+            self.batch_id += 1
+            if self.batch_id >= self.num_batch:
+                self.epoch_id += 1
+                self.batch_id = 0
+                self.data_factory.shuffle_train()
 
-            # ---- Train G ----
-            real, real_d, seq, seq_feat, real_feat = self._get_batch(
-                self.data_factory.train_data,
-                self.data_factory.seq_train,
-                self.data_factory.f_train,
-                self.data_factory.rf_train,
-                self.batch_id * self.bs)
-            current_beta = self._get_beta()
-            g_losses = self.model.train_G(real, real_d, seq, seq_feat, real_feat, br,
-                                          beta=current_beta)
+                print(f'Epoch {self.epoch_id:4d}  loss={loss.numpy():.6f}')
 
-            self._update_batch_id_and_shuffle(ckpt_step, vis_freq)
+                # WandB log
+                if self.use_wandb:
+                    self.wandb.log({'epoch': self.epoch_id, 'loss': loss.numpy()})
 
-            # ---- Validation ----
-            vidx = self.batch_id_valid * self.bs
-            vreal, vreal_d, vseq, vseq_feat, vreal_feat = self._get_batch(
-                self.data_factory.valid_data,
-                self.data_factory.seq_valid,
-                self.data_factory.f_valid,
-                self.data_factory.rf_valid,
-                vidx)
-            vlosses = self.model.valid_loss(vreal, vreal_d, vseq, vseq_feat, vreal_feat, br)
-            self._update_batch_id_valid_and_shuffle()
+                # Checkpoint
+                if self.epoch_id % ckpt_step == 0:
+                    ckpt = os.path.join(self.checkpoint_path, 'model.ckpt')
+                    self.checkpoint.write(ckpt)
+                    print(f'  Saved checkpoint: {ckpt}')
 
-            # ---- Log to WandB ----
-            if self.use_wandb and self.batch_id == 0:
-                self.wandb.log({
-                    'epoch': self.epoch_id,
-                    **{f'G/{k}': v.numpy().item() if hasattr(v, 'numpy') else v
-                       for k, v in g_losses.items()},
-                    **{f'V/{k}': v.numpy().item() if hasattr(v, 'numpy') else v
-                       for k, v in vlosses.items()},
-                }, commit=False)
+                # Visualization sample
+                if self.epoch_id % vis_freq == 0:
+                    self._visualize()
 
-    def _update_batch_id_valid_and_shuffle(self):
-        self.batch_id_valid += 1
-        if self.batch_id_valid >= self.num_batch_valid:
-            self.batch_id_valid = 0
-            self.data_factory.shuffle_valid()
+    # ------------------------------------------------------------------
+    #   Sampling + Visualization
+    # ------------------------------------------------------------------
 
-    def _update_batch_id_and_shuffle(self, ckpt_step, vis_freq):
-        self.batch_id += 1
-        if self.batch_id >= self.num_batch:
-            self.epoch_id += 1
-            self.batch_id = 0
-            self.data_factory.shuffle_train()
-
-            if self.epoch_id % ckpt_step == 0:
-                ckpt = os.path.join(self.checkpoint_path, 'model.ckpt')
-                self.model.save_model(ckpt)
-                print(f'Saved checkpoint epoch {self.epoch_id}: {ckpt}')
-
-            if self.epoch_id % vis_freq == 0:
-                print(f'--- Epoch {self.epoch_id} ---')
-                self._visualize()
+    @tf.function
+    def generate(self, conds, steps=None):
+        """Generate a play via DDIM sampling."""
+        if steps is None:
+            steps = self.cfg.diffusion.ddim_steps
+        B = tf.shape(conds)[0]
+        T = tf.shape(conds)[1]
+        return self.diffusion.sample(self.denoiser, conds,
+                                     [B, T, 16], steps=steps)
 
     def _visualize(self):
-        data_idx = self.batch_id * self.bs
-        seq = self.data_factory.seq_train[data_idx:data_idx + self.bs]
-        feat = self.data_factory.f_train[data_idx:data_idx + self.bs]
+        """Generate and save a sample play animation."""
+        offence, seq_feat = self._get_sample_batch()
 
-        z = z_samples(self.bs, self.cfg.model.latent_dims)
-        fake = self.model.reconstruct(
-            tf.constant(seq, dtype=tf.float32),
-            tf.constant(feat[:, :, :], dtype=tf.float32),
-            tf.constant(z, dtype=tf.float32))
-        fake_np = fake.numpy()
+        conds = tf.concat([offence, seq_feat], axis=-1)
+        generated = self.generate(conds)                          # [B, T, 16]
+        gen_np = generated.numpy()
 
-        sample = fake_np[:, :, :22]
+        defence_gen = gen_np[:, :, :10]                           # defence positions
+        # Reconstruct full play for visualization
+        off_np = offence.numpy()
+        sample = np.concatenate([off_np, defence_gen], axis=-1)   # [B, T, 22]
+
         samples = self.data_factory.recover_BALL_and_A(sample)
         samples = self.data_factory.recover_B(samples)
         fname = os.path.join(self.sample_path, f'reconstruct{self.epoch_id}.mp4')
-        game_visualizer.plot_data(samples[0], self.cfg.training.seq_length,
-                                  file_path=fname, if_save=True)
+        game_visualizer.plot_data(
+            samples[0], self.seq_len, file_path=fname, if_save=True)
 
         if self.use_wandb:
-            self.wandb.log({'sample': self.wandb.Video(fname)}, commit=False)
+            self.wandb.log({'sample': self.wandb.Video(fname)})
 
+    # ------------------------------------------------------------------
+    #   Save / Load
+    # ------------------------------------------------------------------
+
+    def save_model(self, path):
+        self.checkpoint.write(path)
+
+    def load_model(self, path):
+        self.checkpoint.read(path).expect_partial()
+        print(f'Restored checkpoint from {path}')
+
+
+# ---------------------------------------------------------------------------
+#   Main entry
+# ---------------------------------------------------------------------------
 
 @hydra.main(version_base="1.3", config_path="../config", config_name="config")
 def main(cfg: DictConfig):
-    # Resolve paths relative to project root
-    hydra_cfg = hydra.core.hydra_config.HydraConfig.get() if hydra else None
     folder_path = os.path.abspath(cfg.paths.folder_path)
     data_path = os.path.abspath(cfg.paths.data_path)
 
-    # --- Output directory ---
+    # Output directory
     if os.path.exists(folder_path):
         ans = input(f'"{folder_path}" will be removed!! are you sure (y/N)? ')
         if ans.lower() == 'y':
@@ -231,7 +260,11 @@ def main(cfg: DictConfig):
 
     print(OmegaConf.to_yaml(cfg))
 
-    # --- Load data ---
+    # Mixed precision
+    tf.keras.mixed_precision.set_global_policy('mixed_float16')
+    print(f'Compute dtype: {tf.keras.mixed_precision.global_policy().compute_dtype}')
+
+    # Load data
     real_data = np.load(os.path.join(data_path, '50Real.npy'))[:, :cfg.training.seq_length, :, :]
     seq_data = np.load(os.path.join(data_path, '50Seq.npy'))
     features_ = np.load(os.path.join(data_path, 'SeqCond.npy'))
@@ -240,13 +273,17 @@ def main(cfg: DictConfig):
     data_factory = DataFactory(real_data=real_data, seq_data=seq_data,
                                features_=features_, real_feat=real_feat)
 
-    # --- Mixed precision (FP16 on T4, BF16 on A100) ---
-    tf.keras.mixed_precision.set_global_policy('mixed_float16')
-    print(f'Compute dtype: {tf.keras.mixed_precision.global_policy().compute_dtype}')
-    print(f'Variable dtype: {tf.keras.mixed_precision.global_policy().variable_dtype}')
+    # Train
+    model_type = cfg.training.get('model_type', 'diffusion')
+    if model_type == 'vaegan':
+        from ThreeDiscrim import VAEGAN_Model
+        # ... (VAE-GAN path kept for comparison)
+        raise NotImplementedError(
+            "VAE-GAN training via Hydra: use the old Train_Triple.py. "
+            "Set training.model_type=diffusion (default).")
+    else:
+        trainer = DiffusionTrainer(data_factory, cfg, checkpoint_path, sample_path)
 
-    # --- Train ---
-    trainer = Trainer(data_factory, cfg, checkpoint_path, sample_path)
     trainer()
 
     if cfg.wandb.enabled:

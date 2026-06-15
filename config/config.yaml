@@ -31,6 +31,13 @@ paths:
   folder_path: output
   data_path: data
 
+# Diffusion model parameters
+diffusion:
+  T: 1000                # total diffusion timesteps
+  beta_start: 0.0001     # linear noise schedule start
+  beta_end: 0.02         # linear noise schedule end
+  ddim_steps: 50         # DDIM sampling steps (fewer = faster, more = better)
+
 wandb:
   enabled: false
   project: basketballgan
