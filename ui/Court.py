@@ -67,7 +67,7 @@ class Court(QWidget):
 
 
 class plotCanvas(FigureCanvas):
-    def __init__(self,parent = None,width=5.7,height=6.0,dpi =1000):
+    def __init__(self, parent=None, width=5.7, height=6.0, dpi=100):
         self.fig = Figure(figsize=(width,height),dpi=dpi)
         self.frame_id = 0
 
@@ -191,7 +191,7 @@ class plotCanvas(FigureCanvas):
         annotations = [self.axes.annotate(name_list[i], xy=[47., 0.],
                                    horizontalalignment='center',
                                    verticalalignment='center', fontweight='bold',
-                                   fontsize=4, color='white', zorder=11,
+                                   fontsize=7, color='white', zorder=11,
                                    path_effects=LABEL_EFFECT)
                        for i in range(5)]
         self.frame_id += 1
@@ -245,7 +245,7 @@ class plotCanvas(FigureCanvas):
         annotations = [self.axes.annotate(name_list[i], xy=[47., 0.],
                                           horizontalalignment='center',
                                           verticalalignment='center', fontweight='bold',
-                                          fontsize=4, color='white', zorder=11,
+                                          fontsize=7, color='white', zorder=11,
                                           path_effects=LABEL_EFFECT)
                        for i in range(10)]
 

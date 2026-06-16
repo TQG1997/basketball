@@ -3,7 +3,7 @@ import os
 import numpy as np
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import Qt,QLineF
-from PyQt5.QtGui import QPixmap,QPen
+from PyQt5.QtGui import QPixmap, QPen, QPainter
 from Players import MovableDisk
 from Ball import BallDisk
 import SavePos
@@ -34,12 +34,12 @@ class Scene_(QGraphicsScene):
         self.disk5 = MovableDisk(260, 250, 22, self,self.ball)  # C  — paint
 
         pic = QPixmap(os.path.join(os.path.dirname(__file__), "images/court.png"))
-        pic = pic.copy(470,0,
-                       470,500)
-        #pic = pic_copy.scaled(s_w, s_h, Qt.KeepAspectRatio, Qt.FastTransformation)
+        pic = pic.copy(470, 0, 470, 500)
+        pic = pic.scaled(s_w, s_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
 
         img = self.addPixmap(pic)
-        img.setPos(50,40)
+        img.setPos(0, 0)
+        img.setZValue(-1)
 
         self.addItem(self.disk)
         self.addItem(self.disk2)
@@ -202,16 +202,13 @@ class Scene_(QGraphicsScene):
 class App(QGraphicsView):
     def __init__(self,parent = None):
         super(App,self).__init__(parent)
-        self.adjustSize()
         self.scene = Scene_()
         self.setScene(self.scene)
-
-
         self.setFocusPolicy(Qt.NoFocus)
-
-        self.setSizePolicy(QSizePolicy.Fixed,
-                           QSizePolicy.Fixed)
-
-        self.setStyleSheet("border: transparent;")
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setStyleSheet("border: transparent; background-color: #2c3e50;")
+        self.setRenderHint(QPainter.Antialiasing)
 
 

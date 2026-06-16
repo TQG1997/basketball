@@ -269,6 +269,8 @@ class Ui_MainWindow(object):
 
 if __name__ == "__main__":
     import sys
+    import signal
+    signal.signal(signal.SIGINT, signal.SIG_DFL)  # Ctrl+C graceful exit
 
     print("Starting")
     app = QtWidgets.QApplication(sys.argv)
