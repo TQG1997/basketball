@@ -163,9 +163,9 @@ class plotCanvas(FigureCanvas):
 
         ball_circle = plt.Circle(xy=(0, 0), radius=0.9,zorder=10,edgecolor=None,facecolor='g')
 
-        name_list = ['5', '4', '3', '2', '1']
+        name_list = ['PG', 'SG', 'SF', 'PF', 'C']
         # team A -> read circle, team B -> blue circle, ball -> small green circle
-        [player_circles.append(plt.Circle(xy=(0, 0), radius=1, color='tomato',zorder=10))
+        [player_circles.append(plt.Circle(xy=(0, 0), radius=0.8, color='tomato', zorder=10))
          for _ in range(5)]
 
         for x in range (4):
@@ -191,7 +191,7 @@ class plotCanvas(FigureCanvas):
         annotations = [self.axes.annotate(name_list[i], xy=[47., 0.],
                                    horizontalalignment='center',
                                    verticalalignment='center', fontweight='bold',
-                                   fontsize=10, color='white', zorder=11,
+                                   fontsize=6, color='white', zorder=11,
                                    path_effects=LABEL_EFFECT)
                        for i in range(5)]
         self.frame_id += 1
@@ -206,16 +206,16 @@ class plotCanvas(FigureCanvas):
         court = plt.imread(COURT_PNG)
         self.axes.imshow(court, zorder=0, extent=[0, 94, 50, 0])
 
-        name_list = ['5', '4', '3', '2', '1',
-                     '5', '4', '3', '2', '1']
+        name_list = ['PG', 'SG', 'SF', 'PF', 'C',
+                     'B1', 'B2', 'B3', 'B4', 'B5']
         player_circles = []
         line_path = []
         line_path2 = []
         line_path3 = []
         # team A -> read circle, team B -> blue circle, ball -> small green circle
-        [player_circles.append(plt.Circle(xy=(0, 0), radius=1, color='tomato'))
+        [player_circles.append(plt.Circle(xy=(0, 0), radius=0.8, color='tomato'))
          for _ in range(5)]
-        [player_circles.append(plt.Circle(xy=(0, 0), radius=1, color='royalblue'))
+        [player_circles.append(plt.Circle(xy=(0, 0), radius=0.8, color='royalblue'))
          for _ in range(5)]
         ball_circle = plt.Circle(xy=(0, 0), radius=0.9, zorder=10, edgecolor=None, facecolor='lime')
         # plot
@@ -245,7 +245,7 @@ class plotCanvas(FigureCanvas):
         annotations = [self.axes.annotate(name_list[i], xy=[47., 0.],
                                           horizontalalignment='center',
                                           verticalalignment='center', fontweight='bold',
-                                          fontsize=10, color='white', zorder=11,
+                                          fontsize=6, color='white', zorder=11,
                                           path_effects=LABEL_EFFECT)
                        for i in range(10)]
 
