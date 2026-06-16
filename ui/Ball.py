@@ -69,9 +69,9 @@ class BallDisk(QGraphicsEllipseItem):
         segData.append(p4)
         segData.append(p5)
 
-        #seg = np.array(segData)
         self.segData.append(segData)
-        seg = np.array(self.segData)
+        # Use dtype=object — player trajectories can have different lengths
+        seg = np.array(self.segData, dtype=object)
         self.tmpData = [self.getPos()]
         print("segData:")
         print(seg.shape)
