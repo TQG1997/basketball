@@ -5,6 +5,9 @@ from math import sqrt
 
 def save_pos(data):
     print("Saving")
+    if not data or len(data) == 0:
+        print("ERROR: No trajectory data to save. Draw ball path first!")
+        return
     seg = np.array(data, dtype=object)
     seg_l = len(seg)
     print("Segments:", seg_l)

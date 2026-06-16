@@ -1,3 +1,4 @@
+import os
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import Qt
@@ -93,12 +94,17 @@ class Ui_MainWindow(object):
     def run_model(self):
         self.statusbar.showMessage("Saving...")
         self.play.scene.savePos()
+        if not os.path.exists('Points/points2.npy'):
+            self.statusbar.showMessage("ERROR: Draw ball path first (click-release on court)")
+            return
         self.statusbar.showMessage("Generating...")
-        WGAN.run_Model(self.model, self.data_factory)
+        try:
+            WGAN.run_Model(self.model, self.data_factory)
+        except Exception as e:
+            self.statusbar.showMessage(f"ERROR: {e}")
+            return
         self.ani_button.setChecked(True)
-        self.statusbar.showMessage("Done!")
-
-        self.statusbar.showMessage("🏀 Basketball Play Generator")
+        self.statusbar.showMessage("Done — 🏀 Basketball Play Generator")
 
     def Buttons(self,play):
         self.widget = QtWidgets.QWidget(self.centralwidget)
