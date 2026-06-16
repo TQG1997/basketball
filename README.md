@@ -16,7 +16,7 @@ pip install gdown
 gdown --folder https://drive.google.com/drive/folders/1uNPw7LOA3xENclQRtSlUftiR7tlVNOts -O data/
 
 # Train (auto-tunes batch/filters for your GPU)
-python src/train.py --data_path=data --output=output --max_epochs=500 --auto --yes
+python src/train.py --data_path=data --output=output --max_epochs=2000 --auto --yes
 ```
 
 ## Google Colab
@@ -70,7 +70,8 @@ Basketball/
 | `--data_path` | `data` | Dataset directory |
 | `--output` | `output` | Output dir (checkpoints, samples) |
 | `--max_epochs` | `null` | Stop after N epochs (null = forever) |
-| `--batch_size` | `64` | Batch size |
+| `--resume` | `false` | Resume from latest checkpoint in output dir |
+| `--batch_size` | `64` | Batch size (overridden by --auto) |
 | `--lr` | `1e-4` | AdamW learning rate |
 | `--n_filters` | `256` | Conv filters |
 | `--n_resblock` | `4` | Residual blocks per network |
@@ -86,9 +87,9 @@ Use `--auto` for automatic VRAM-aware configuration:
 
 | GPU | VRAM | --auto sets |
 |-----|------|-------------|
-| T4 (Colab free) | 15 GB | batch=256, filters=512, resblocks=8 |
-| A10G | 24 GB | batch=512, filters=768, resblocks=12 |
-| A100 | 40 GB | batch=512, filters=768, resblocks=12 |
+| T4 (Colab free) | 15 GB | batch≈350, filters=1536, resblocks=10 |
+| A10G | 24 GB | batch=512, filters=2048, resblocks=14 |
+| A100 | 40 GB | batch=512, filters=2048, resblocks=14 |
 
 Override any auto setting: `--auto --batch_size=128`. See `config/config.yaml` for all settings.
 
