@@ -60,16 +60,26 @@ def Load_Model(checkpoint_path=None):
 
     data_dir = os.path.join(DATA_PATH, 'Model_data')
 
-    _check_file(os.path.join(data_dir, '50Seq.npy'), 'Sequence data')
-    _check_file(os.path.join(data_dir, '50Real.npy'), 'Real data')
+    # Try loading normalization data (not critical for inference)
+    try:
+        image_data = np.load(os.path.join(data_dir, '50Seq.npy'))
+        features_ = np.load(os.path.join(data_dir, 'SeqCond.npy'))
+        real_data = np.load(os.path.join(data_dir, '50Real.npy'))[:, :50, :, :]
+        real_feat = np.load(os.path.join(data_dir, 'RealCond.npy'))
+        data_factory = DataFactory(real_data, image_data, features_, real_feat)
+        print('DataFactory loaded — normalization enabled')
+    except FileNotFoundError:
+        print('Data files not found — outputs will be in normalized coordinates')
+        data_factory = None
 
-    image_data = np.load(os.path.join(data_dir, '50Seq.npy'))
-    features_ = np.load(os.path.join(data_dir, 'SeqCond.npy'))
-    real_data = np.load(os.path.join(data_dir, '50Real.npy'))[:, :50, :, :]
-    real_feat = np.load(os.path.join(data_dir, 'RealCond.npy'))
-    data_factory = DataFactory(real_data, image_data, features_, real_feat)
-
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # Auto-detect best device
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+    elif torch.backends.mps.is_available():
+        device = torch.device('mps')
+    else:
+        device = torch.device('cpu')
+    print(f'Device: {device}')
 
     diffusion = GaussianDiffusion(T=1000).to(device)
     denoiser = DenoiserNet(in_dim=16, cond_dim=18, n_filters=256,
@@ -114,7 +124,8 @@ def run_Model(model_tuple, data_factory, points_path=None, output_path=None):
         points_batch[:, :, 2:12].reshape([dims, target_length, 10]),
         feature_batch.reshape([dims, target_length, 6]),
     ], axis=-1)
-    team_AB = data_factory.normalize(team_AB)
+    if data_factory is not None:
+        team_AB = data_factory.normalize(team_AB)
     team_A = team_AB[:, :, :12]
     team_Feat = team_AB[:, :, 12:]
 
@@ -131,9 +142,12 @@ def run_Model(model_tuple, data_factory, points_path=None, output_path=None):
                                          steps=DDIM_STEPS)
         result_np = generated.cpu().numpy()
 
-        recovered = data_factory.recover_data(
-            np.concatenate([conds_np, result_np[:, :, :10]], axis=-1))
-        recovered = np.concatenate([recovered, result_np[:, :, 10:]], axis=-1)
+        if data_factory is not None:
+            recovered = data_factory.recover_data(
+                np.concatenate([conds_np, result_np[:, :, :10]], axis=-1))
+            recovered = np.concatenate([recovered, result_np[:, :, 10:]], axis=-1)
+        else:
+            recovered = np.concatenate([conds_np, result_np[:, :, :10], result_np[:, :, 10:]], axis=-1)
         results.append(recovered)
 
     results = np.stack(results, axis=1)
