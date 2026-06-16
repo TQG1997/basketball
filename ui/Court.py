@@ -191,7 +191,7 @@ class plotCanvas(FigureCanvas):
         annotations = [self.axes.annotate(name_list[i], xy=[47., 0.],
                                    horizontalalignment='center',
                                    verticalalignment='center', fontweight='bold',
-                                   fontsize=6, color='white', zorder=11,
+                                   fontsize=4, color='white', zorder=11,
                                    path_effects=LABEL_EFFECT)
                        for i in range(5)]
         self.frame_id += 1
@@ -245,7 +245,7 @@ class plotCanvas(FigureCanvas):
         annotations = [self.axes.annotate(name_list[i], xy=[47., 0.],
                                           horizontalalignment='center',
                                           verticalalignment='center', fontweight='bold',
-                                          fontsize=6, color='white', zorder=11,
+                                          fontsize=4, color='white', zorder=11,
                                           path_effects=LABEL_EFFECT)
                        for i in range(10)]
 

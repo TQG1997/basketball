@@ -26,12 +26,12 @@ class Scene_(QGraphicsScene):
     def initScene(self,s_w,s_h):
         self.clear()
 
-        self.ball = BallDisk(285, 290, 15, self)
-        self.disk = MovableDisk(300, 250, 30, self,self.ball)   # PG — top
-        self.disk2 = MovableDisk(350, 300, 30, self,self.ball)  # SG — wing
-        self.disk3 = MovableDisk(320, 200, 30, self,self.ball)  # SF — wing
-        self.disk4 = MovableDisk(280, 180, 30, self,self.ball)  # PF — post
-        self.disk5 = MovableDisk(260, 250, 30, self,self.ball)  # C  — paint
+        self.ball = BallDisk(285, 290, 12, self)
+        self.disk = MovableDisk(300, 250, 22, self,self.ball)   # PG — top
+        self.disk2 = MovableDisk(350, 300, 22, self,self.ball)  # SG — wing
+        self.disk3 = MovableDisk(320, 200, 22, self,self.ball)  # SF — wing
+        self.disk4 = MovableDisk(280, 180, 22, self,self.ball)  # PF — post
+        self.disk5 = MovableDisk(260, 250, 22, self,self.ball)  # C  — paint
 
         pic = QPixmap(os.path.join(os.path.dirname(__file__), "images/court.png"))
         pic = pic.copy(470,0,

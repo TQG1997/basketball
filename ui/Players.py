@@ -49,7 +49,7 @@ class MovableDisk(QGraphicsEllipseItem):
         # Center text on the player circle with bold font for readability
         font = self.io.font()
         font.setBold(True)
-        font.setPointSize(12)
+        font.setPointSize(9)
         self.io.setFont(font)
         rect = self.io.boundingRect()
         self.io.setPos(self.pos().x() + self.radius - rect.width()/2,
