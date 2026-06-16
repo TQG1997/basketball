@@ -42,11 +42,10 @@ Requires a trained checkpoint at `ui/Data/checkpoints/model_epoch500.pt` and nor
 ┌──────────────────────────────┬──────────────────────────────┐
 │   🖼️ Drawing Board (left)     │   🎬 Animation (right)       │
 │                              │                              │
-│  Double-click → place ball   │  Radio: Sketch Animation     │
-│  Click Set → enter draw mode │         Play Simulation     │
-│  Drag players to reposition  │                              │
-│  Click-Release → draw ball   │  ▶ Play/Pause  ─●─ slider   │
-│  Click Generate (→ button)   │                              │
+│  Double-click → ball (+auto draw)│  Radio: Sketch Animation     │
+│  Drag PG/SG/SF/PF/C to position │         Play Simulation     │
+│  Click-drag → draw ball path    │                              │
+│  Undo / Generate → AI defense   │  ▶ Play/Pause  ─●─ slider   │
 └──────────────────────────────┴──────────────────────────────┘
 ```
 
@@ -54,20 +53,20 @@ Requires a trained checkpoint at `ui/Data/checkpoints/model_epoch500.pt` and nor
 
 | Step | Action | What Happens |
 |------|--------|-------------|
-| ① | **Double-click** court (left panel) | Places the basketball. Nearest player snaps to ball. |
-| ② | Click **Set** | Enters draw mode — players become draggable. |
-| ③ | **Drag** red circles | Reposition 5 offensive players (numbered 1-5). |
-| ④ | **Click & release** on court | Draws one ball trajectory segment. The ball line appears as a green dotted arrow. |
-| ⑤ | Repeat ④ for more segments | Each click-release adds a pass/shot segment. Double-click a player to finalize their path with wiggle animation. |
-| ⑥ | Click **→ Generate** | AI generates defensive play. Status bar shows "Saving... → Generating... → Done!" |
-| ⑦ | Select **Sketch Animation** | Replay your offensive sketch. |
-| ⑧ | Select **Play Simulation** | Watch the AI-generated defensive response. Use ▶/⏸ and the timeline slider. |
-| ⑨ | **Clear** | Reset everything to start over. |
+| ① | **Double-click** court (left) | Ball appears. Nearest player auto-snaps. Draw mode ON. |
+| ② | **Drag** players (PG/SG/SF/PF/C) | Reposition offensive formation on the court. |
+| ③ | **Click & drag** on court | Draw ball trajectory — gold dotted arrow shows pass/shot. |
+| ④ | Repeat ③ for each pass/dribble | Build multi-segment play: pass→SG→dribble→pass→C→shoot. |
+| ⑤ | **Undo** (if mistake) | Removes last segment without resetting everything. |
+| ⑥ | Click **→ Generate** | AI generates defensive play. Status: Saving → Generating → Done! |
+| ⑦ | **Sketch Animation** | Replay your offensive play sketch. |
+| ⑧ | **Play Simulation** | Watch AI-generated defensive response. ▶/⏸ + slider. |
+| ⑨ | **Clear** | Reset all to start fresh. |
 
 **Tips:**
-- The ball snaps to the nearest player on each pass — watch the green circle.
-- If the ball reaches the basket (bottom-right corner), it triggers a shot attempt.
-- Players show temporary trajectory trails while being dragged.
+- Ball near basket = shot attempt (auto-detected). Ball near player = pass.
+- Double-click a moving player to add wiggle animation to their path.
+- PG=Point Guard, SG=Shooting Guard, SF=Small Forward, PF=Power Forward, C=Center.
 
 ## Project Structure
 
