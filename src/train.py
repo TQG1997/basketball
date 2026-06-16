@@ -6,6 +6,7 @@ Usage:
 
 import os
 import sys
+import glob
 import shutil
 import argparse
 import numpy as np
@@ -167,6 +168,19 @@ def train(config, data_path, output_path):
     valid_freq = t.get('valid_freq', 5)
     epoch = 0
 
+    # Resume from latest checkpoint if available
+    ckpt_files = sorted(glob.glob(os.path.join(ckpt_dir, 'model_epoch*.pt')))
+    if ckpt_files:
+        latest = ckpt_files[-1]
+        print(f'Found checkpoint: {latest}')
+        ckpt = torch.load(latest, map_location=device)
+        denoiser.load_state_dict(ckpt['model_state_dict'])
+        optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+        if 'ema_state_dict' in ckpt:
+            ema.module.load_state_dict(ckpt['ema_state_dict'])
+        epoch = ckpt.get('epoch', 0)
+        print(f'Resumed from epoch {epoch}  loss was {ckpt.get("loss", "?")}')
+
     print(f'Train batches/epoch: {num_batches}  Val batches: {len(valid_loader)}')
     print(f'Samples: {len(train_dataset)} train, {len(valid_dataset)} valid')
     print(f'Diffusion T={d["T"]}  DDIM steps={d["ddim_steps"]}')
@@ -284,6 +298,7 @@ def parse_config():
     parser.add_argument('--vis_freq', type=int, default=10)
     parser.add_argument('--auto', action='store_true', help='Auto-tune params for GPU VRAM')
     parser.add_argument('--yes', action='store_true', help='Skip confirmation prompt')
+    parser.add_argument('--resume', action='store_true', help='Resume from latest checkpoint in output dir')
     args = parser.parse_args()
 
     # Auto-configure based on GPU VRAM
@@ -309,13 +324,15 @@ def parse_config():
             'checkpoint_step': args.checkpoint_step,
             'vis_freq': args.vis_freq,
         },
-    }, args.data_path, args.output, args.yes
+    }, args.data_path, args.output, args.yes, args.resume
 
 
 if __name__ == '__main__':
-    config, data_path, output_path, skip_prompt = parse_config()
+    config, data_path, output_path, skip_prompt, resume = parse_config()
 
-    if os.path.exists(output_path):
+    if resume:
+        print(f'Resume mode: keeping {output_path}, loading latest checkpoint')
+    elif os.path.exists(output_path):
         if skip_prompt:
             shutil.rmtree(output_path)
         else:
