@@ -28,6 +28,8 @@ def save_pos(data):
     if check_pass(a_pass):
         ballx1, bally1 = Bezier.plotB(b_pos, nTimes=l)
 
+        time = min(time, l)  # clamp to available bezier points
+        time = min(time, l)  # clamp to available bezier points
         pass_ = [[ballx1[time - 1], bally1[time - 1]], pass_pos[1]]
         ballx, bally = Bezier.plotB(pass_, nTimes=time)
 
