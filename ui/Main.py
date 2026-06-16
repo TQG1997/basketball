@@ -125,7 +125,7 @@ class Ui_MainWindow(object):
 
     def Buttons(self,play):
         self.widget = QtWidgets.QWidget(self.centralwidget)
-        self.widget.setGeometry(QtCore.QRect(240, 630, 200, 40))
+        self.widget.setGeometry(QtCore.QRect(160, 630, 320, 40))
         self.widget.setObjectName("ButtonBar")
 
         self.clearButton = QtWidgets.QPushButton("Clear",self.widget)
@@ -133,10 +133,18 @@ class Ui_MainWindow(object):
         self.clearButton.setObjectName("clearButton")
         self.clearButton.clicked.connect(play.scene.clear_c)
 
-        self.setButton = QtWidgets.QPushButton("Set",self.widget)
+        self.setButton = QtWidgets.QPushButton("Draw",self.widget)
         self.setButton.setGeometry(QtCore.QRect(90, 0, 75, 25))
         self.setButton.setObjectName("setButton")
         self.setButton.clicked.connect(play.scene.setDraw)
+
+        self.undoButton = QtWidgets.QPushButton("Undo",self.widget)
+        self.undoButton.setGeometry(QtCore.QRect(170, 0, 75, 25))
+        self.undoButton.clicked.connect(play.scene.undoLast)
+
+        self.statusLabel = QtWidgets.QLabel("① Double-click court → ② Draw ball → ③ Generate", self.widget)
+        self.statusLabel.setGeometry(QtCore.QRect(10, 28, 300, 15))
+        self.statusLabel.setStyleSheet("color: #bdc3c7; font-size: 11px;")
 
         return None
 

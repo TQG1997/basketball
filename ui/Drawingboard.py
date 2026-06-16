@@ -26,12 +26,12 @@ class Scene_(QGraphicsScene):
     def initScene(self,s_w,s_h):
         self.clear()
 
-        self.ball = BallDisk(0, 250, 15, self)
-        self.disk = MovableDisk(0, 200, 30, self,self.ball)
-        self.disk2 = MovableDisk(0, 150, 30, self,self.ball)
-        self.disk3 = MovableDisk(0, 100, 30, self,self.ball)
-        self.disk4 = MovableDisk(0, 50, 30, self,self.ball)
-        self.disk5 = MovableDisk(0, 0, 30, self,self.ball)
+        self.ball = BallDisk(285, 290, 15, self)
+        self.disk = MovableDisk(300, 250, 30, self,self.ball)   # PG — top
+        self.disk2 = MovableDisk(350, 300, 30, self,self.ball)  # SG — wing
+        self.disk3 = MovableDisk(320, 200, 30, self,self.ball)  # SF — wing
+        self.disk4 = MovableDisk(280, 180, 30, self,self.ball)  # PF — post
+        self.disk5 = MovableDisk(260, 250, 30, self,self.ball)  # C  — paint
 
         pic = QPixmap(os.path.join(os.path.dirname(__file__), "images/court.png"))
         pic = pic.copy(470,0,
@@ -48,11 +48,11 @@ class Scene_(QGraphicsScene):
         self.addItem(self.disk5)
         self.addItem(self.ball)
 
-        self.disk.addText(5)
-        self.disk2.addText(4)
-        self.disk3.addText(3)
-        self.disk4.addText(2)
-        self.disk5.addText(1)
+        self.disk.addText("PG")
+        self.disk2.addText("SG")
+        self.disk3.addText("SF")
+        self.disk4.addText("PF")
+        self.disk5.addText("C")
 
     def clear_c(self):
         self.initScene(570,580)
@@ -79,6 +79,13 @@ class Scene_(QGraphicsScene):
 
     def savePos(self):
         SavePos.save_pos(self.ball.segData)
+
+    def undoLast(self):
+        """Remove last ball trajectory segment."""
+        if self.ball.segData:
+            self.ball.segData.pop()
+            self.ball.seg = max(0, self.ball.seg - 1)
+            print(f"Undid last segment. {len(self.ball.segData)} remaining")
 
     def SegPos(self):
 
@@ -174,10 +181,12 @@ class Scene_(QGraphicsScene):
         #if self.disk.if_selected() == True or self.disk2.if_selected() == True or self.disk3.if_selected() == True or self.disk4.if_selected() == True or  self.disk5.if_selected() == True:
         #    print("Player selected")
         if self.disk.allow_draw == False or self.disk2.allow_draw == False or self.disk3.allow_draw == False or self.disk4.allow_draw == False or self.disk5.allow_draw == False:
-            print("Place ball")
+            print("Ball placed — draw mode ON")
             self.ball_placed = True
-            self.ball.set_pos(x_e-12.5,y_e-12.5)
+            self.ball.set_pos(x_e-12.5, y_e-12.5)
             self.ball.getPos()
+            # Auto-enable draw mode after placing ball
+            self.setDraw()
 
             p1 = self.disk.ori_pos()
             p2 = self.disk2.ori_pos()
