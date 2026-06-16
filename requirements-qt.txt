@@ -1,0 +1,7 @@
+# Qt desktop UI dependencies (macOS/Linux)
+torch>=2.1
+numpy>=1.24
+matplotlib>=3.7
+PyQt5>=5.15
+rdp>=0.8
+scipy>=1.10
