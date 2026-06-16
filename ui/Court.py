@@ -36,19 +36,33 @@ class Court(QWidget):
 
     def start_sim(self):
         self.cond_ = 0
-        data = np.load('./Data/output/output.npy')
-        self.canvas.on_start_G(data,self.cond_)
+        output_path = os.path.join(os.path.dirname(__file__), 'Data', 'output', 'output.npy')
+        if not os.path.exists(output_path):
+            print(f"Output not found: {output_path} — run Generate first")
+            return
+        try:
+            data = np.load(output_path)
+            self.canvas.on_start_G(data, self.cond_)
+        except Exception as e:
+            print(f"Error loading simulation: {e}")
 
-    def get_len(self,cond):
+    def get_len(self, cond):
         l = 0
-        if cond == 1:
-            data = np.load('./Points/points2.npy')
-            l = len(data)
-        elif cond == 2:
-            data = np.load('./Data/output/output.npy')
-            play = data[0, self.cond_]
-            l = len(play)
-
+        base = os.path.dirname(__file__)
+        try:
+            if cond == 1:
+                pts_path = os.path.join(base, 'Points', 'points2.npy')
+                if os.path.exists(pts_path):
+                    data = np.load(pts_path)
+                    l = len(data)
+            elif cond == 2:
+                out_path = os.path.join(base, 'Data', 'output', 'output.npy')
+                if os.path.exists(out_path):
+                    data = np.load(out_path)
+                    play = data[0, self.cond_]
+                    l = len(play)
+        except Exception:
+            pass
         return l
 
 
@@ -242,10 +256,14 @@ class plotCanvas(FigureCanvas):
         self.draw()
 
     def on_start(self):
-        data = np.load('./Points/points2.npy')
+        pts_path = os.path.join(os.path.dirname(__file__), 'Points', 'points2.npy')
+        if not os.path.exists(pts_path):
+            print(f"Sketch not found: {pts_path} — draw ball path first")
+            return
+        data = np.load(pts_path)
         data[:,[0,2,4,6,8,10]] = [x - 2.5 for x in data[:,[0,2,4,6,8,10]]]
         play_len = len(data)
-        self.plot_data(data,play_len)
+        self.plot_data(data, play_len)
 
     def on_start_G(self, data, cond=0):
         play = data[0,cond]
