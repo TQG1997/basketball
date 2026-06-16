@@ -25,22 +25,49 @@ python src/train.py --data_path=data --output=output --max_epochs=2000 --auto --
 
 One-click training on free GPU. Use **Runtime → Change runtime type → T4 GPU**.
 
-## Inference (Local)
+## Desktop App (PyQt5)
+
+Native macOS/Linux desktop app for sketching offensive plays and visualizing AI-generated defensive responses:
 
 ```bash
-# Create minimal venv (no training deps)
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements-inference.txt
-
-# Launch Web UI
-python ui/app.py              # http://127.0.0.1:7860
-python ui/app.py --share      # public link
+pip install -r requirements-qt.txt
+cd ui && python Main.py
 ```
 
-Interactive browser interface: upload sketches, place points on court, view generated plays. Requires a trained checkpoint at `ui/Data/checkpoints/model_epoch500.pt`.
+Requires a trained checkpoint at `ui/Data/checkpoints/model_epoch500.pt` and normalization data in `ui/Data/Model_data/`.
 
-> China users: add `-i https://pypi.tuna.tsinghua.edu.cn/simple` for faster install.
+### How to Use
+
+```
+┌──────────────────────────────┬──────────────────────────────┐
+│   🖼️ Drawing Board (left)     │   🎬 Animation (right)       │
+│                              │                              │
+│  Double-click → place ball   │  Radio: Sketch Animation     │
+│  Click Set → enter draw mode │         Play Simulation     │
+│  Drag players to reposition  │                              │
+│  Click-Release → draw ball   │  ▶ Play/Pause  ─●─ slider   │
+│  Click Generate (→ button)   │                              │
+└──────────────────────────────┴──────────────────────────────┘
+```
+
+**Step-by-step:**
+
+| Step | Action | What Happens |
+|------|--------|-------------|
+| ① | **Double-click** court (left panel) | Places the basketball. Nearest player snaps to ball. |
+| ② | Click **Set** | Enters draw mode — players become draggable. |
+| ③ | **Drag** red circles | Reposition 5 offensive players (numbered 1-5). |
+| ④ | **Click & release** on court | Draws one ball trajectory segment. The ball line appears as a green dotted arrow. |
+| ⑤ | Repeat ④ for more segments | Each click-release adds a pass/shot segment. Double-click a player to finalize their path with wiggle animation. |
+| ⑥ | Click **→ Generate** | AI generates defensive play. Status bar shows "Saving... → Generating... → Done!" |
+| ⑦ | Select **Sketch Animation** | Replay your offensive sketch. |
+| ⑧ | Select **Play Simulation** | Watch the AI-generated defensive response. Use ▶/⏸ and the timeline slider. |
+| ⑨ | **Clear** | Reset everything to start over. |
+
+**Tips:**
+- The ball snaps to the nearest player on each pass — watch the green circle.
+- If the ball reaches the basket (bottom-right corner), it triggers a shot attempt.
+- Players show temporary trajectory trails while being dragged.
 
 ## Project Structure
 
@@ -52,8 +79,13 @@ Basketball/
 │   ├── ops.py                  # Conv1D_SN, ResBlock1D, Self/CrossAttention
 │   ├── game_visualizer.py      # Play animation (matplotlib)
 │   └── utils.py                # DataFactory re-export
-├── ui/                         # Web UI + inference
-│   ├── app.py                  # Gradio interface
+├── ui/                         # Desktop app + Web UI + inference
+│   ├── Main.py                 # PyQt5 desktop app (main entry)
+│   ├── Drawingboard.py         # Interactive sketch canvas
+│   ├── Court.py                # Animation playback
+│   ├── Players.py / Ball.py    # Draggable player & ball items
+│   ├── SavePos.py / Bezier.py  # Trajectory smoothing
+│   ├── app.py                  # Gradio web interface (alternative)
 │   ├── inference.py            # PyTorch inference pipeline
 │   └── draw_feat.py            # Ball-possession feature extraction
 ├── shared/                     # DataFactory (numpy, framework-agnostic)
