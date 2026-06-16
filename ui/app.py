@@ -38,7 +38,6 @@ import draw_feat
 # ---- Paths & constants ----
 MODEL_PATH = os.path.join(_app_dir, 'Data', 'checkpoints', 'model_epoch500.pt')
 DATA_DIR = os.path.join(_app_dir, 'Data', 'Model_data')
-BACKGROUND = os.path.join(_app_dir, 'images', 'court.png')
 DDIM_STEPS, DIFFUSION_T, N_LATENT, SEQ_LEN = 50, 1000, 100, 50
 
 # Court bounds (half-court right side, in feet)
@@ -69,7 +68,15 @@ class ModelManager:
     def _ensure_loaded(self):
         if self._loaded:
             return
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        # Auto-detect best device: CUDA > MPS (Apple Silicon) > CPU
+        if torch.cuda.is_available():
+            self.device = torch.device('cuda')
+        elif torch.backends.mps.is_available():
+            self.device = torch.device('mps')
+        else:
+            self.device = torch.device('cpu')
+        print(f'Device: {self.device}')
+
         try:
             real_data = np.load(os.path.join(DATA_DIR, '50Real.npy'))[:, :50, :, :]
             seq_data = np.load(os.path.join(DATA_DIR, '50Seq.npy'))
@@ -129,41 +136,51 @@ _state = PlayState()
 _court_cache = os.path.join(_app_dir, 'Points', '_court.png')
 
 def render_court():
-    """Render court to a PNG file, return path. Players + ball trajectory on court bg."""
-    fig, ax = plt.subplots(figsize=(6, 3.2), dpi=100)
-    ax.set_xlim(CX_MIN, CX_MAX)
-    ax.set_ylim(CY_MIN, CY_MAX)
+    """Render court with matplotlib (no image — avoids browser drag). 4x larger."""
+    fig, ax = plt.subplots(figsize=(12, 6.4), dpi=100)
+    ax.set_xlim(CX_MIN - 2, CX_MAX + 2)
+    ax.set_ylim(CY_MIN - 2, CY_MAX + 2)
+    ax.set_facecolor('#f5e6c8')       # hardwood floor color
     ax.axis('off')
     fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
 
-    if os.path.exists(BACKGROUND):
-        bg = plt.imread(BACKGROUND)
-        ax.imshow(bg, extent=[0, 94, 50, 0], aspect='auto', zorder=0)
-    ax.set_xlim(CX_MIN, CX_MAX)
+    # Court outline
+    from matplotlib.patches import Rectangle, Arc
+    ax.add_patch(Rectangle((CX_MIN, CY_MIN), COURT_W, COURT_H,
+                            fill=False, ec='#333', lw=3, zorder=1))
+    # Half-court arc
+    ax.add_patch(Arc((CX_MIN, 25), 12, 12, angle=0, theta1=-90, theta2=90,
+                      ec='#333', lw=2, zorder=1))
+    # Free throw lane (right side)
+    ax.add_patch(Rectangle((CX_MAX - 19, CY_MIN + 8), 19, 34,
+                            fill=False, ec='#333', lw=2, zorder=1))
+    # Three-point arc (approximate right side)
+    ax.add_patch(Arc(BASKET_POS, 23.75 * 2, 23.75 * 2, angle=0, theta1=-110, theta2=110,
+                      ec='#333', lw=2, zorder=1))
 
     # Basket
-    ax.add_patch(Circle(BASKET_POS, 1.0, color='orange', ec='darkorange', lw=2, zorder=10))
-    ax.text(*BASKET_POS, 'B', ha='center', va='center', fontsize=8,
-            fontweight='bold', color='darkorange', zorder=11)
+    ax.add_patch(Circle(BASKET_POS, 1.0, color='#e74c3c', ec='#c0392b', lw=2, zorder=10))
+    ax.text(*BASKET_POS, 'B', ha='center', va='center', fontsize=10,
+            fontweight='bold', color='white', zorder=11)
 
     # Players
     for i, name in enumerate(PLAYER_ORDER):
         x, y = _state.players[name]
-        ax.add_patch(Circle((x, y), 1.8, color=PLAYER_COLORS[i], ec='white', lw=1.5, zorder=10))
-        ax.annotate(name, (x, y), ha='center', va='center', fontsize=6,
+        ax.add_patch(Circle((x, y), 1.8, color=PLAYER_COLORS[i], ec='white', lw=2, zorder=10))
+        ax.annotate(name, (x, y), ha='center', va='center', fontsize=9,
                     fontweight='bold', color='white', zorder=11)
 
     # Ball trajectory
     if len(_state.ball_path) >= 2:
         pts = np.array(_state.ball_path)
-        ax.plot(pts[:, 0], pts[:, 1], '-', color=BALL_COLOR, lw=2, zorder=8, alpha=0.8)
+        ax.plot(pts[:, 0], pts[:, 1], '-', color=BALL_COLOR, lw=3, zorder=8, alpha=0.9)
     if _state.ball_path:
         bx, by = _state.ball_path[-1]
-        ax.add_patch(Circle((bx, by), 0.9, color=BALL_COLOR, ec='#e67e22', lw=1, zorder=12))
+        ax.add_patch(Circle((bx, by), 0.9, color=BALL_COLOR, ec='#e67e22', lw=1.5, zorder=12))
 
-    ax.text(48, 2, f'Ball: {len(_state.ball_path)} pts | Click player=move, empty=add path',
-            fontsize=6, color='#555',
-            bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='#ddd', alpha=0.9))
+    ax.text(48, 2, f'Ball: {len(_state.ball_path)} pts  |  Click player=move, empty=add path',
+            fontsize=9, color='#555',
+            bbox=dict(boxstyle='round,pad=0.3', fc='white', ec='#ccc', alpha=0.9))
 
     os.makedirs(os.path.dirname(_court_cache), exist_ok=True)
     fig.savefig(_court_cache, format='png', dpi=100, bbox_inches='tight', pad_inches=0.05)
@@ -336,7 +353,7 @@ def create_ui():
                 court_display = gr.Image(
                     value=render_court(),
                     label='Click player to move · Click court to draw ball path',
-                    type='filepath', height=360)
+                    type='filepath', height=520)
 
                 with gr.Row():
                     gr.Markdown(_status_text(), every=0.1, elem_id='status-md')
