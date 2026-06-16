@@ -164,7 +164,7 @@ class MovableDisk(QGraphicsEllipseItem):
 
     def mouseDoubleClickEvent(self, event: 'QGraphicsSceneMouseEvent'):
         if self.allow_draw:
-            if self.pen_type == 1:
+            if self.pen_type == 1 and len(self.last_rdp) >= 3:
                 self.temp_group.removeFromGroup(self.lines)
 
                 wavex, wavey = Bezier.plotB(self.last_rdp[:-1], 20)
