@@ -15,6 +15,23 @@ class Ui_MainWindow(object):
         self.play = App(MainWindow)
         self.court = Court(MainWindow)
         MainWindow.setAutoFillBackground(True)
+        MainWindow.setStyleSheet("""
+            QMainWindow { background-color: #2c3e50; }
+            QPushButton { background-color: #3498db; color: white; border-radius: 4px;
+                          padding: 6px 12px; font-weight: bold; font-size: 13px; }
+            QPushButton:hover { background-color: #2980b9; }
+            QPushButton#clearButton { background-color: #e74c3c; }
+            QPushButton#clearButton:hover { background-color: #c0392b; }
+            QPushButton#setButton { background-color: #27ae60; }
+            QPushButton#setButton:hover { background-color: #229954; }
+            QPushButton#GenButton { background-color: #f39c12; border-radius: 25px; }
+            QPushButton#GenButton:hover { background-color: #e67e22; }
+            QStatusBar { background-color: #1a252f; color: #ecf0f1; font-size: 13px; }
+            QRadioButton { color: #ecf0f1; font-size: 12px; }
+            QLabel { color: #ecf0f1; }
+            QMenuBar { background-color: #1a252f; color: #ecf0f1; }
+            QMenuBar::item:selected { background-color: #3498db; }
+        """)
         p = MainWindow.palette()
         p.setColor(MainWindow.backgroundRole(), Qt.white)
         MainWindow.setPalette(p)

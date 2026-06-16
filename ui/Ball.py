@@ -1,6 +1,6 @@
-from PyQt5.QtGui import QPen
+from PyQt5.QtGui import QPen, QColor
 from PyQt5.QtWidgets import *
-from PyQt5.QtCore import Qt,QPointF
+from PyQt5.QtCore import Qt, QPointF
 import numpy as np
 from math import sqrt
 import Bezier
@@ -12,7 +12,7 @@ class BallDisk(QGraphicsEllipseItem):
         self.posdata = []
         self.tmpData = []
         self.setPos(x,y)
-        self.setBrush(Qt.green)
+        self.setBrush(QColor('#f1c40f'))  # bright gold, visible on dark court
 
         self.setFlag(QGraphicsItem.ItemIsMovable,False)
         self.setAcceptHoverEvents(False)

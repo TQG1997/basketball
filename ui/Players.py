@@ -43,10 +43,17 @@ class MovableDisk(QGraphicsEllipseItem):
         self.io.setAcceptHoverEvents(False)
         self.io.setTabChangesFocus(False)
 
-    def addText(self,num):
-        self.io.setPlainText("{}".format(num))
+    def addText(self, num):
+        self.io.setPlainText(str(num))
         self.io.setDefaultTextColor(Qt.white)
-        self.io.setPos(self.pos().x()+6,self.pos().y()+2)
+        # Center text on the player circle with bold font for readability
+        font = self.io.font()
+        font.setBold(True)
+        font.setPointSize(12)
+        self.io.setFont(font)
+        rect = self.io.boundingRect()
+        self.io.setPos(self.pos().x() + self.radius - rect.width()/2,
+                       self.pos().y() + self.radius - rect.height()/2)
         self.scene.addItem(self.io)
 
     def if_selected(self):

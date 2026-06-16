@@ -6,12 +6,14 @@ import matplotlib
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.animation as animation
+import matplotlib.patheffects as pe
 import numpy as np
 import matplotlib.pyplot as plt
 
 matplotlib.use("qt5agg")
 
 COURT_PNG = os.path.join(os.path.dirname(__file__), "images/court.png")
+LABEL_EFFECT = [pe.withStroke(linewidth=2, foreground='black')]
 
 class Court(QWidget):
     def __init__(self,parent = None):
@@ -174,7 +176,9 @@ class plotCanvas(FigureCanvas):
         # annotations on circles
         annotations = [self.axes.annotate(name_list[i], xy=[47., 0.],
                                    horizontalalignment='center',
-                                   verticalalignment='center', fontweight='bold',fontSize=1,color='white',zorder=11)
+                                   verticalalignment='center', fontweight='bold',
+                                   fontsize=10, color='white', zorder=11,
+                                   path_effects=LABEL_EFFECT)
                        for i in range(5)]
         self.frame_id += 1
         if self.frame_id == length:
@@ -226,7 +230,9 @@ class plotCanvas(FigureCanvas):
         # annotations on circles
         annotations = [self.axes.annotate(name_list[i], xy=[47., 0.],
                                           horizontalalignment='center',
-                                          verticalalignment='center', fontweight='bold',fontSize=1,color='white')
+                                          verticalalignment='center', fontweight='bold',
+                                          fontsize=10, color='white', zorder=11,
+                                          path_effects=LABEL_EFFECT)
                        for i in range(10)]
 
         self.frame_id += 1
