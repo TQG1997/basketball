@@ -29,6 +29,11 @@ data/
 # Training output
 tmp/
 
+# UI cache files
+ui/Points/_court.png
+ui/Points/current_play.npy
+Points/
+
 # Environment
 .env
 .venv
