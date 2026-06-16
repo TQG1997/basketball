@@ -129,7 +129,11 @@ class MovableDisk(QGraphicsEllipseItem):
         old_cursor_position = event.lastPos()
         new_x = new_cursor_position.x()-old_cursor_position.x()
         new_y = new_cursor_position.y()-old_cursor_position.y()
-        self.io.setPos(self.pos().x() + 6, self.pos().y() + 2)
+
+        # Keep label centered on player during drag
+        rect = self.io.boundingRect()
+        self.io.setPos(self.pos().x() + self.radius - rect.width()/2,
+                       self.pos().y() + self.radius - rect.height()/2)
 
         self.setPos(QPointF(new_x, new_y))
 
